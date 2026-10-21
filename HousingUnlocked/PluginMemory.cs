@@ -6,6 +6,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using HousingUnlocked.Anywheres;
 using FFXIVClientStructs.FFXIV.Client.Game.Object;
+using FFXIVClientStructs.FFXIV.Client.Graphics;
 using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
 using FFXIVClientStructs.FFXIV.Client.LayoutEngine;
 using FFXIVClientStructs.FFXIV.Client.LayoutEngine.Group;
@@ -1080,9 +1081,12 @@ namespace HousingUnlocked
     /// Wall snap: wall-mounted items (HousingItemCategory 15) snap onto wall
     /// collision surfaces — including "false walls" (Stage Panels, partitions,
     /// wardrobes) whose meshes carry the WallCollisionMesh material flag
-    /// (nibble d3 == 1, bits 20..23). Fires when the item's pivot or any of its
-    /// TargetMarker points comes within the item's wall snap threshold
-    /// (max TargetMarker XZ distance x 0.5) of a nearby wall surface's world AABB.
+    /// (nibble d3 == 1, bits 20..23). The check is one-sided: each wall triangle's
+    /// real geometric normal decides which side accepts items (32 of the 38 wall
+    /// receivers are strictly one-sided — the back of a stage panel does nothing).
+    /// Fires when the item's pivot or any of its TargetMarker points comes within
+    /// the item's wall snap threshold (max TargetMarker XZ distance x 0.5) of a
+    /// front-facing wall triangle.
     /// </summary>
     public unsafe void UpdateWallSnapDetection()
     {
@@ -1157,25 +1161,88 @@ namespace HousingUnlocked
           pos.Z - lx * sinY + lz * cosY));
       }
 
-      // Scan placed items for WallCollisionMesh surfaces and measure each probe
-      // against their world AABBs.
-      var walls = GetNearbyWallSurfaces();
+      // One-sided wall surface scan: walk placed receivers' wall-flagged collision
+      // triangles in world space and measure each probe against the FRONT side only.
+      // 32 of the game's 38 wall receivers are strictly one-sided (verified offline
+      // from their collision meshes) — the back of a stage panel accepts nothing.
       float best = float.PositiveInfinity;
       string bestName = "";
-      foreach (var w in walls)
+      int wallTris = 0;
+      var usedAabbFallback = false;
+
+      for (var i = 0; i < 600; i++)
       {
-        foreach (var p in probes)
+        var addr = HousingModule->GetCurrentManager()->Objects[i];
+        if (addr == 0) continue;
+        var go = (GameObject*)addr;
+        if (go->SharedGroupLayoutInstance == active) continue;
+        if (Vector3.Distance(pos, go->Position) > 8f) continue;
+
+        var rowId = go->BaseId;
+        if (!_furnitureRowCache.TryGetValue(rowId, out var cached))
         {
-          var d = DistancePointToAABB(p, w.BB);
-          if (d < best)
+          uint itemId = 0;
+          string name = "";
+          if (Plugin.TryGetFurnishing(rowId, out var f))
           {
-            best = d;
-            bestName = w.Name;
+            itemId = f.Item.Value.RowId;
+            name = f.Item.Value.Name.ExtractText();
+          }
+          else if (Plugin.TryGetYardObject(rowId, out var y))
+          {
+            itemId = y.Item.Value.RowId;
+            name = y.Item.Value.Name.ExtractText();
+          }
+          cached = (itemId, name);
+          _furnitureRowCache[rowId] = cached;
+        }
+        if (cached.ItemId == 0) continue;
+
+        var group = go->SharedGroupLayoutInstance;
+        if (group == null) continue;
+        var groupM = BuildMatrix(group->Transform);
+
+        var itemInstances = group->Instances.Instances;
+        var itemSize = (int)(itemInstances.Last - itemInstances.First);
+        var hadWallTris = false;
+
+        for (int c = 0; c < itemSize; c++)
+        {
+          var childPtr = itemInstances.First[c];
+          if (childPtr.Value == null) continue;
+          var ci = childPtr.Value->Instance;
+          if (ci == null) continue;
+          if (ci->Id.Type != InstanceType.BgPart) continue;
+          var childM = BuildMatrix(*ci->GetTransformImpl());
+          WalkWallTriangles(
+            (BgPartsLayoutInstance*)ci,
+            childM * groupM,
+            probes, limit, cached.Name,
+            ref best, ref bestName, ref wallTris, ref hadWallTris);
+        }
+
+        // Embedded-census fallback: known wall receiver, but no wall triangles were
+        // readable at runtime — fall back to a two-sided union-AABB check.
+        if (!hadWallTris && SnapRangeData.IsWallReceiver(cached.ItemId))
+        {
+          usedAabbFallback = true;
+          var union = GetItemColliderUnion(group);
+          if (union.HasValue)
+          {
+            foreach (var p in probes)
+            {
+              var d = DistancePointToAABB(p, union.Value);
+              if (d < best)
+              {
+                best = d;
+                bestName = cached.Name;
+              }
+            }
           }
         }
       }
 
-      WallSnapDiagnostic = $"{walls.Count} WallCollision receiver(s) nearby, threshold {threshold:0.###} +safety {config.SnapThreshold:0.###} = {limit:0.###}, probes {probes.Count}";
+      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), threshold {threshold:0.###} +safety {config.SnapThreshold:0.###} = {limit:0.###}, probes {probes.Count}";
 
       if (best <= limit)
       {
@@ -1183,6 +1250,190 @@ namespace HousingUnlocked
         LastWallSnapDistance = best;
         LastWallSnapTargetName = bestName;
       }
+    }
+
+    private static Matrix4x4 BuildMatrix(FFXIVClientStructs.FFXIV.Client.LayoutEngine.Transform t) => t.Compose();
+
+    /// <summary>
+    /// Walks a BgPart's collision mesh and, for every wall-flagged triangle
+    /// (bits 20..23 == 1), measures the front-side (normal side) distance from
+    /// each probe point. The back face of a one-sided wall correctly produces
+    /// no warning.
+    /// </summary>
+    private static unsafe void WalkWallTriangles(
+      BgPartsLayoutInstance* bgPart, Matrix4x4 world, List<Vector3> probes, float limit,
+      string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall)
+    {
+      var collider = bgPart->Collider;
+      if (collider == null || collider->GetColliderType() != ColliderType.Mesh) return;
+      var meshCol = (ColliderMesh*)collider;
+      if (meshCol->MeshIsSimple || meshCol->Mesh == null) return;
+      var pcb = (MeshPCB*)meshCol->Mesh;
+      if (pcb->RootNode == null) return;
+
+      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0);
+    }
+
+    private static unsafe void WalkNode(
+      MeshPCB.FileNode* node, Matrix4x4 world, List<Vector3> probes, float limit,
+      string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
+      HashSet<nint> visited, int depth)
+    {
+      if (node == null || depth > 64) return;
+      if (!visited.Add((nint)node)) return;
+
+      // Prune: conservative world-space box of this node's bounds; if every probe
+      // is beyond the warning limit from the box, no triangle inside can matter.
+      var lb = node->LocalBounds;
+      Vector3 bmin = new(float.MaxValue), bmax = new(float.MinValue);
+      for (int cx = 0; cx < 2; cx++)
+      for (int cy = 0; cy < 2; cy++)
+      for (int cz = 0; cz < 2; cz++)
+      {
+        var corner = Vector3.Transform(
+          new Vector3(
+            (cx & 1) != 0 ? lb.Max.X : lb.Min.X,
+            (cy & 1) != 0 ? lb.Max.Y : lb.Min.Y,
+            (cz & 1) != 0 ? lb.Max.Z : lb.Min.Z),
+          world);
+        bmin = Vector3.Min(bmin, corner);
+        bmax = Vector3.Max(bmax, corner);
+      }
+      var box = new AABB { Min = bmin, Max = bmax };
+      var pruned = true;
+      foreach (var p in probes)
+      {
+        if (DistancePointToAABB(p, box) <= limit) { pruned = false; break; }
+      }
+      if (pruned) return;
+
+      for (int p = 0; p < node->NumPrims; p++)
+      {
+        var prim = &node->PrimitivesPtr[p];
+        if (((prim->Material >> 20) & 0xF) != 1) continue;
+        wallTris++;
+        anyWall = true;
+
+        var a = Vector3.Transform(NodeVertex(node, prim->V1), world);
+        var b = Vector3.Transform(NodeVertex(node, prim->V2), world);
+        var c = Vector3.Transform(NodeVertex(node, prim->V3), world);
+        var n = Vector3.Cross(b - a, c - a);
+        var len = n.Length();
+        if (len < 1e-9f) continue;
+        n /= len;
+
+        foreach (var probe in probes)
+        {
+          // One-sided: only the front (normal) side of the surface accepts items.
+          if (Vector3.Dot(n, probe - a) < 0f) continue;
+          var d = DistancePointTriangle(probe, a, b, c);
+          if (d < best)
+          {
+            best = d;
+            bestName = name;
+          }
+        }
+      }
+
+      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1);
+      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1);
+    }
+
+    /// <summary>Decodes a mesh vertex (raw floats, or compressed ushorts scaled into the node bounds).</summary>
+    private static unsafe Vector3 NodeVertex(MeshPCB.FileNode* node, int index)
+    {
+      var numRaw = node->NumVertsRaw;
+      if (index < numRaw)
+      {
+        var p = node->RawVerticesPtr + 3 * index;
+        return new Vector3(p[0], p[1], p[2]);
+      }
+      var ci = index - numRaw;
+      var cp = node->CompressedVerticesPtr + 3 * ci;
+      return node->LocalBounds.Min + node->CompressedVertexScale * new Vector3(cp[0], cp[1], cp[2]);
+    }
+
+    /// <summary>Exact distance from a point to a triangle (Ericson, Real-Time Collision Detection).</summary>
+    private static float DistancePointTriangle(Vector3 p, Vector3 a, Vector3 b, Vector3 c)
+    {
+      var ab = b - a;
+      var ac = c - a;
+      var ap = p - a;
+      var d1 = Vector3.Dot(ab, ap);
+      var d2 = Vector3.Dot(ac, ap);
+      if (d1 <= 0f && d2 <= 0f) return Vector3.Distance(p, a);
+
+      var bp = p - b;
+      var d3 = Vector3.Dot(ab, bp);
+      var d4 = Vector3.Dot(ac, bp);
+      if (d3 >= 0f && d4 <= d3) return Vector3.Distance(p, b);
+
+      var vc = d1 * d4 - d3 * d2;
+      if (vc <= 0f && d1 >= 0f && d3 <= 0f)
+      {
+        var v = d1 / (d1 - d3);
+        return Vector3.Distance(p, a + v * ab);
+      }
+
+      var cp = p - c;
+      var d5 = Vector3.Dot(ab, cp);
+      var d6 = Vector3.Dot(ac, cp);
+      if (d6 >= 0f && d5 <= d6) return Vector3.Distance(p, c);
+
+      var vb = d5 * d2 - d1 * d6;
+      if (vb <= 0f && d2 >= 0f && d6 <= 0f)
+      {
+        var w = d2 / (d2 - d6);
+        return Vector3.Distance(p, a + w * ac);
+      }
+
+      var va = d3 * d6 - d5 * d4;
+      if (va <= 0f && d4 - d3 >= 0f && d5 - d6 >= 0f)
+      {
+        var w = (d4 - d3) / (d4 - d3 + (d5 - d6));
+        return Vector3.Distance(p, b + w * (c - b));
+      }
+
+      var denom = 1f / (va + vb + vc);
+      var v2 = vb * denom;
+      var w2 = vc * denom;
+      return Vector3.Distance(p, a + ab * v2 + ac * w2);
+    }
+
+    /// <summary>Union AABB of all BgPart collider world bounds for a placed item (embedded fallback).</summary>
+    private static unsafe AABB? GetItemColliderUnion(SharedGroupLayoutInstance* group)
+    {
+      AABB? result = null;
+      var instances = group->Instances.Instances;
+      var size = (int)(instances.Last - instances.First);
+      for (int c = 0; c < size; c++)
+      {
+        var childPtr = instances.First[c];
+        if (childPtr.Value == null) continue;
+        var ci = childPtr.Value->Instance;
+        if (ci == null) continue;
+        if (ci->Id.Type != InstanceType.BgPart) continue;
+        var bgPart = (BgPartsLayoutInstance*)ci;
+        if (bgPart->Collider == null) continue;
+        AABB bb = default;
+        bgPart->Collider->GetWorldBB(&bb);
+        if (result == null)
+        {
+          result = bb;
+        }
+        else
+        {
+          var u = result.Value;
+          if (bb.Min.X < u.Min.X) u.Min.X = bb.Min.X;
+          if (bb.Min.Y < u.Min.Y) u.Min.Y = bb.Min.Y;
+          if (bb.Min.Z < u.Min.Z) u.Min.Z = bb.Min.Z;
+          if (bb.Max.X > u.Max.X) u.Max.X = bb.Max.X;
+          if (bb.Max.Y > u.Max.Y) u.Max.Y = bb.Max.Y;
+          if (bb.Max.Z > u.Max.Z) u.Max.Z = bb.Max.Z;
+          result = u;
+        }
+      }
+      return result;
     }
 
     /// <summary>Distance from a point to the closest point on an AABB (0 when inside).</summary>
