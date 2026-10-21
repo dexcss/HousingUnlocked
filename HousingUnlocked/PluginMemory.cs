@@ -1,0 +1,1316 @@
+using Dalamud.Game.NativeWrapper;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Numerics;
+using System.Runtime.InteropServices;
+using HousingUnlocked.Anywheres;
+using FFXIVClientStructs.FFXIV.Client.Game.Object;
+using FFXIVClientStructs.FFXIV.Client.Graphics.Scene;
+using FFXIVClientStructs.FFXIV.Client.LayoutEngine;
+using FFXIVClientStructs.FFXIV.Client.LayoutEngine.Group;
+using FFXIVClientStructs.FFXIV.Client.LayoutEngine.Layer;
+using FFXIVClientStructs.FFXIV.Client.LayoutEngine.Node;
+using FFXIVClientStructs.FFXIV.Common.Component.BGCollision;
+using FFXIVClientStructs.FFXIV.Common.Component.BGCollision.Math;
+using CameraManager = FFXIVClientStructs.FFXIV.Client.Game.Control.CameraManager;
+using SphereBounds = FFXIVClientStructs.FFXIV.Common.Math.SphereBounds;
+using ColliderType = FFXIVClientStructs.FFXIV.Common.Component.BGCollision.ColliderType;
+
+namespace HousingUnlocked
+{
+  public class PluginMemory
+  {
+    private bool _isHousingOpen;
+
+    // Layout and housing module pointers.
+    private readonly IntPtr _layoutWorldPtr;
+    private readonly IntPtr _housingModulePtr;
+
+    public unsafe LayoutWorld* Layout => (LayoutWorld*)_layoutWorldPtr;
+    public unsafe HousingStructure* HousingStructure => Layout->HousingStruct;
+    public unsafe HousingModule* HousingModule => _housingModulePtr != IntPtr.Zero ? (HousingModule*)Marshal.ReadIntPtr(_housingModulePtr) : null;
+    public static unsafe Camera* Camera => &CameraManager.Instance()->GetActiveCamera()->CameraBase.SceneCamera;
+
+    private static AtkUnitBasePtr HousingLayout => Plugin.GameGui.GetAddonByName("HousingLayout");
+    public static bool GamepadMode => !(HousingLayout != null && HousingLayout.IsVisible);
+
+    // Local references to position and rotation to use to free them when an item isn't selected but to keep the UI bound to a reference.
+    public Vector3 Position;
+    public Vector3 Rotation;
+
+    // Function for selecting an item, usually used when clicking on one in game.
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void SelectItemDelegate(IntPtr housingStruct, IntPtr item);
+    public SelectItemDelegate SelectItem = null!;
+
+    // [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    // public delegate void PlaceHousingItemDelegate(IntPtr item, Vector3 position);
+    // private readonly IntPtr placeHousingItemAddress;
+    // public PlaceHousingItemDelegate PlaceHousingItem = null!;
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    public delegate void HousingLayoutModelUpdateDelegate(IntPtr item);
+    public HousingLayoutModelUpdateDelegate HousingLayoutModelUpdate = null!;
+
+    public PluginMemory()
+    {
+      try
+      {
+        PlaceAnywhere.Initialize();
+        ShowcaseAnywhere.Initialize();
+
+        // Pointers for housing structures.
+        _layoutWorldPtr = Plugin.TargetModuleScanner.GetStaticAddressFromSig("48 8B D1 48 8B 0D ?? ?? ?? ?? 48 85 C9 74 0A", 3);
+        _housingModulePtr = Plugin.TargetModuleScanner.GetStaticAddressFromSig("48 8B 05 ?? ?? ?? ?? 8B 52");
+
+        // Read the pointers.
+        _layoutWorldPtr = Marshal.ReadIntPtr(_layoutWorldPtr);
+
+        // Select housing item.
+        var selectItemAddress = Plugin.TargetModuleScanner.ScanText("48 85 D2 0F 84 ?? ?? ?? ?? 53 41 ?? 48 83 ?? ?? 48 89");
+        SelectItem = Marshal.GetDelegateForFunctionPointer<SelectItemDelegate>(selectItemAddress);
+        
+        // Address for the place item function.
+        // placeHousingItemAddress = Plugin.TargetModuleScanner.ScanText("40 53 48 83 EC 20 8B 02 48 8B D9 89 41 50 8B 42 04 89 41 54 8B 42 08 89 41 58 48 83 E9 80");
+        // PlaceHousingItem = Marshal.GetDelegateForFunctionPointer<PlaceHousingItemDelegate>(placeHousingItemAddress);
+        // Housing item model update.
+        
+        var housingLayoutModelUpdateAddress = Plugin.TargetModuleScanner.ScanText("48 89 6C 24 ?? 48 89 74 24 ?? 48 89 7C 24 ?? 41 56 48 83 EC 50 48 8B E9 48 8B 49");
+        HousingLayoutModelUpdate = Marshal.GetDelegateForFunctionPointer<HousingLayoutModelUpdateDelegate>(housingLayoutModelUpdateAddress);
+
+        var config = Plugin.GetConfiguration();
+
+        if (config.PlaceAnywhere)
+                    SetPlaceAnywhere(Plugin.GetConfiguration().PlaceAnywhere);
+      }
+      catch (Exception ex)
+      {
+        Plugin.Log.Error(ex, "Error while calling PluginMemory.ctor()");
+      }
+    }
+
+    /// <summary>
+    /// Dispose for the memory functions.
+    /// </summary>
+    public void Dispose()
+    {
+      try
+      {
+                // Disable the place anywhere in case it's on.
+                SetPlaceAnywhere(false);
+        AtkManager.ShowFurnishingList(true);
+      }
+      catch (Exception ex)
+      {
+        Plugin.Log.Error(ex, "Error while calling PluginMemory.Dispose()");
+      }
+    }
+
+    /// <summary>
+    /// Is the housing menu open.
+    /// </summary>
+    /// <returns>Boolean state.</returns>
+    public unsafe bool IsHousingOpen()
+    {
+      try
+      {
+        if (HousingStructure == null)
+          return false;
+
+        // Anything other than none means the housing menu is open.
+        return HousingStructure->Mode != HousingLayoutMode.None;
+      }
+      catch
+      {
+        return false;
+      }
+    }
+
+    /// <summary>
+    /// Checks if you can edit a housing item, specifically checks that rotate mode is active.
+    /// </summary>
+    /// <returns>Boolean state if housing menu is on or off.</returns>
+    public unsafe bool CanEditItem()
+    {
+      try
+      {
+        if (HousingStructure == null)
+          return false;
+
+        // Rotate mode only.
+        return HousingStructure->Mode == HousingLayoutMode.Rotate;
+      }
+      catch
+      {
+        return false;
+      }
+    }
+
+    /// <summary>
+    /// Read the position of the active item.
+    /// </summary>
+    /// <returns>Vector3 of the position.</returns>
+    public unsafe Vector3 ReadPosition()
+    {
+      // Ensure that we're hooked and have the housing structure address.
+      if (HousingStructure == null)
+        throw new PluginException("Housing structure is invalid!");
+
+      // Ensure active item pointer isn't null.
+      var item = HousingStructure->ActiveItem;
+      if (item == null)
+        throw new PluginException("No valid item selected!");
+
+      // Return the position vector.
+      return item->Transform.Translation;
+    }
+
+    /// <summary>
+    /// Reads the rotation of the item.
+    /// </summary>
+    /// <returns></returns>
+    public unsafe Vector3 ReadRotation()
+    {
+      // Ensure that we're hooked and have the housing structure address.
+      if (HousingStructure == null)
+        throw new PluginException("Housing structure is invalid!");
+
+      // Ensure active item pointer isn't null.
+      var item = HousingStructure->ActiveItem;
+      if (item == null)
+        throw new PluginException("No valid item selected!");
+
+      // Return the rotation radian.
+      return Util.FromQ(item->Transform.Rotation);
+    }
+
+    // Cache for the active item's FFXIV Item ID. We re-resolve only when the
+    // underlying ActiveItem pointer changes — saves iterating 600 GameObjects
+    // every frame when the same item stays selected.
+    private unsafe void* _cachedActiveItemPtr = null;
+    private uint _cachedActiveItemId = 0;
+
+    // Per-item snap threshold derived from the item's collision-mesh footprint.
+    // Captured at selection-time alongside the item ID; expressed in game units.
+    // 0 = not yet computed / unavailable.
+    public float ActiveItemSnapThreshold { get; private set; } = 0f;
+
+    /// <summary>
+    /// Forces the next call to <see cref="GetActiveItemFFXIVId"/> to re-read the
+    /// active item's data even if the underlying pointer hasn't changed. Used
+    /// after editing per-item config (overrides) so the cached threshold picks
+    /// up the new value without requiring the user to deselect and reselect.
+    /// </summary>
+    public unsafe void InvalidateActiveItemCache()
+    {
+      _cachedActiveItemPtr = null;
+    }
+
+    /// <summary>
+    /// Dumps undocumented and potentially-relevant fields from the active item's
+    /// first BgPart child, looking for per-item data that would tell us the
+    /// engine's actual snap distance. Wired up to the debug window — purely for
+    /// reverse-engineering, no production behavior depends on this.
+    /// </summary>
+    public unsafe void DumpRawSnapHuntFields()
+    {
+      if (HousingStructure == null || HousingStructure->ActiveItem == null)
+      {
+        Dalamud.Bindings.ImGui.ImGui.Text("(no active item)");
+        return;
+      }
+      var active = HousingStructure->ActiveItem;
+      var instances = active->Instances.Instances;
+      var size = (int)(instances.Last - instances.First);
+      if (size == 0)
+      {
+        Dalamud.Bindings.ImGui.ImGui.Text("(no children)");
+        return;
+      }
+
+      Dalamud.Bindings.ImGui.ImGui.Text($"ActiveItem (SharedGroup) addr: 0x{(ulong)active:X16}, {size} children");
+      Dalamud.Bindings.ImGui.ImGui.Text($"Item position: ({active->Transform.Translation.X:0.###}, {active->Transform.Translation.Y:0.###}, {active->Transform.Translation.Z:0.###})");
+      // Y rotation in degrees (from quaternion). Useful for understanding the
+      // item's facing — and so which direction its snap face points.
+      var rot = active->Transform.Rotation;
+      // Extract Y rotation from quaternion (yaw).
+      var yaw = System.Math.Atan2(2.0f * (rot.W * rot.Y + rot.X * rot.Z), 1.0f - 2.0f * (rot.Y * rot.Y + rot.X * rot.X));
+      Dalamud.Bindings.ImGui.ImGui.Text($"Item Y rotation: {yaw * 180.0 / System.Math.PI:0.##}°");
+      Dalamud.Bindings.ImGui.ImGui.Separator();
+
+      // Walk ALL BgPart children and dump material+geometry info for each.
+      // Goal: find which children have snap-receptive material flags and which
+      // child's geometry shape would identify a "back face" for wall snap.
+      for (int i = 0; i < size; i++)
+      {
+        var childPtr = instances.First[i];
+        if (childPtr.Value == null) continue;
+        var ci = childPtr.Value->Instance;
+        if (ci == null) continue;
+        if (ci->Id.Type != InstanceType.BgPart) continue;
+
+        var bgPart = (BgPartsLayoutInstance*)ci;
+        var collider = bgPart->Collider;
+
+        Dalamud.Bindings.ImGui.ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), $"--- Child[{i}] ---");
+
+        // Material flags — the key piece. Per the Re:MakePlace dev's table:
+        //   digit 3 (mask 0x00100000) = 1 → WallCollisionMesh
+        //   digit 4 (mask 0x00010000) = 1 → FloorTop, 8 → TableTop, 9 → RugTop
+        //   digit 5 (mask 0x00001000) = 2/3/6/7 → various PlayerCollision flavors
+        ulong matLow = bgPart->CollisionMaterialIdLow;
+        ulong matHigh = bgPart->CollisionMaterialIdHigh;
+        ulong matMaskLow = bgPart->CollisionMaterialMaskLow;
+        ulong matMaskHigh = bgPart->CollisionMaterialMaskHigh;
+        // Combine to a 64-bit value for easy nibble inspection.
+        ulong material = (matHigh << 32) | matLow;
+        Dalamud.Bindings.ImGui.ImGui.Text($"  Material: 0x{material:X16} (mask 0x{(matMaskHigh << 32) | matMaskLow:X16})");
+
+        // Decode the nibbles per RMP dev's table.
+        // Reading hex digits left-to-right in the 8-digit (32-bit) low display:
+        //   digit 1 → bits 28..31
+        //   digit 2 → bits 24..27
+        //   digit 3 → bits 20..23 (WallCollisionMesh when =1)
+        //   digit 4 → bits 16..19 (FloorTop=1, TableTop=8, RugTop=9)
+        //   digit 5 → bits 12..15 (PlayerCollision flavors)
+        //   digit 6 → bits 8..11
+        //   digit 7 → bits 4..7  (sound type)
+        //   digit 8 → bits 0..3  (sound type)
+        int d3 = (int)((matLow >> 20) & 0xF);
+        int d4 = (int)((matLow >> 16) & 0xF);
+        int d5 = (int)((matLow >> 12) & 0xF);
+        var labels = new System.Collections.Generic.List<string>();
+        if (d3 == 1) labels.Add("WallCollisionMesh");
+        if (d4 == 1) labels.Add("FloorTop");
+        if (d4 == 8) labels.Add("TableTop");
+        if (d4 == 9) labels.Add("RugTop");
+        if (d5 == 2) labels.Add("PlayerCol");
+        if (d5 == 3) labels.Add("PlayerCol+CamCol");
+        if (d5 == 6) labels.Add("PlayerCol(?)");
+        if (d5 == 7) labels.Add("PlayerCol+CamCol+CursorCol");
+        Dalamud.Bindings.ImGui.ImGui.Text($"    Decoded flags: {(labels.Count > 0 ? string.Join(", ", labels) : "(none of known flags)")}");
+
+        if (collider == null)
+        {
+          Dalamud.Bindings.ImGui.ImGui.Text("  No collider");
+          continue;
+        }
+
+        // Collider type and bounding info.
+        var colliderType = collider->GetColliderType();
+        Dalamud.Bindings.ImGui.ImGui.Text($"  Collider type: {colliderType}");
+
+        if (colliderType == ColliderType.Mesh)
+        {
+          var meshCol = (ColliderMesh*)collider;
+          var mesh = meshCol->Mesh;
+          if (mesh != null)
+          {
+            var meshPCB = (MeshPCB*)mesh;
+            var rootNode = meshPCB->RootNode;
+            if (rootNode != null)
+            {
+              var lb = rootNode->LocalBounds;
+              Dalamud.Bindings.ImGui.ImGui.Text($"  LocalBounds: {lb.Max.X - lb.Min.X:0.###} x {lb.Max.Y - lb.Min.Y:0.###} x {lb.Max.Z - lb.Min.Z:0.###}  (center: ({(lb.Min.X+lb.Max.X)/2:0.##}, {(lb.Min.Y+lb.Max.Y)/2:0.##}, {(lb.Min.Z+lb.Max.Z)/2:0.##}))");
+            }
+          }
+        }
+        else if (colliderType == ColliderType.Box || colliderType == ColliderType.Cylinder || colliderType == ColliderType.Sphere || colliderType == ColliderType.Plane)
+        {
+          var scale = *(Vector3*)((byte*)collider + 0xD8);
+          Dalamud.Bindings.ImGui.ImGui.Text($"  {colliderType}.Scale: ({scale.X:0.###}, {scale.Y:0.###}, {scale.Z:0.###})");
+        }
+      }
+    }
+
+    // Last table-snap detection results (tabletop item snapping onto a TableTop surface).
+    public bool LastTableSnapHit { get; private set; } = false;
+    public string LastTableSnapTargetName { get; private set; } = "";
+    public float LastTableSnapDeltaY { get; private set; } = float.PositiveInfinity;
+    public float LastTableSnapSurfaceY { get; private set; } = 0f;
+    public string TableSnapDiagnostic { get; private set; } = "(not computed)";
+
+    // Last raycast result for the active item (for diagnostics).
+    public float LastFloorRaycastDistance { get; private set; } = float.PositiveInfinity;
+    public bool LastFloorRaycastHit { get; private set; } = false;
+
+    // Same for upward raycast — used to detect upward snaps to ceiling/floor-above.
+    public float LastCeilingRaycastDistance { get; private set; } = float.PositiveInfinity;
+    public bool LastCeilingRaycastHit { get; private set; } = false;
+
+    // Diagnostic info for snap-threshold computation (visible in /Housing Unlocked Debug).
+    public string SnapThresholdDiagnostic { get; private set; } = "(not computed)";
+
+    // ==== Item-to-item snap detection (SphereCastRange overrides) ====
+
+    // Where the active item's SphereCastRange came from (runtime instance read
+    // vs embedded .sgb table vs none). Visible in /Housing Unlocked Debug.
+    public string ActiveItemSphereCastSource { get; private set; } = "(none)";
+
+    // Last item-to-item snap detection results (warning banner + debug panel).
+    public bool LastItemSnapHit { get; private set; } = false;
+    public float LastItemSnapDistance { get; private set; } = float.PositiveInfinity;
+    public float LastItemSnapEffectiveRange { get; private set; } = 0f;
+    public uint LastItemSnapTargetItemId { get; private set; } = 0;
+    public string LastItemSnapTargetName { get; private set; } = "";
+    public string ItemSnapDiagnostic { get; private set; } = "(not computed)";
+
+    // Cache: HousingFurniture/HousingYardObject row ID -> (item ID, item name).
+    // Filled on first sight of each placed furniture row; avoids per-frame
+    // Excel RowRef dereferences during the item-snap scan.
+    private readonly Dictionary<uint, (uint ItemId, string Name)> _furnitureRowCache = new();
+
+    // Cache: Item RowId -> ItemUICategory row ID (78 = Tabletop, 79 = Wall-mounted,
+    // per Re:MakePlace's shipped item handling). Used for table-snap detection.
+    private readonly Dictionary<uint, uint> _itemUICategoryCache = new();
+
+    // HousingItemCategory of the cached active item (15 = wall-mounted, per the
+    // HousingFurniture/HousingYardObject sheets).
+    private uint _cachedActiveItemCategory = 0;
+
+    /// <summary>HousingItemCategory of the active item (78=tabletop item, 15=wall-mounted item).</summary>
+    public uint ActiveItemCategory => _cachedActiveItemCategory;
+
+    /// <summary>
+    /// Computes the floor-snap threshold for the currently selected item.
+    /// </summary>
+    /// <returns>The snap threshold in game units, or 0 if no item is selected
+    /// or no usable collider data is available.</returns>
+    /// <remarks>
+    /// The FFXIV housing engine uses <c>min(footprintX, footprintZ) / 2</c> as the
+    /// snap distance. The footprint source depends on collider type:
+    ///
+    /// <list type="bullet">
+    /// <item><b>Mesh colliders</b> (most furniture): the footprint is the static
+    /// mesh's tight bounding box, accessed via
+    /// <c>ColliderMesh.Mesh-&gt;MeshPCB.RootNode.LocalBounds</c>. This is in mesh-
+    /// local space; the divide-by-2 gives the snap distance directly.</item>
+    /// <item><b>Box / Cylinder / Sphere / Plane colliders</b> (analytic shapes
+    /// like the Company Chest): local bounds are unit (-1..1), so the world-space
+    /// half-extent IS the <c>Scale</c> field at offset 0xD8. <c>min(scale.X,
+    /// scale.Z)</c> directly gives the snap distance (no divide because the half-
+    /// extent already represents "from center to edge").</item>
+    /// </list>
+    ///
+    /// A housing item is a <see cref="SharedGroupLayoutInstance"/> (a group of
+    /// child layout instances). We compute a per-child threshold from each child's
+    /// collider, then take the minimum across children — the engine snaps when
+    /// *any* child's footprint is close to a surface.
+    ///
+    /// Validated against measured snap distances:
+    /// <list type="table">
+    /// <item><term>Grassy Rug (Mesh)</term><description>computed 2.0, measured 2.06</description></item>
+    /// <item><term>White Rect Partition (Mesh)</term><description>computed 0.113, measured 0.11</description></item>
+    /// <item><term>Serving Barrel (Mesh)</term><description>computed 0.373, measured 0.36</description></item>
+    /// <item><term>Company Chest (Box)</term><description>computed 0.491, measured 0.49</description></item>
+    /// </list>
+    /// </remarks>
+    private unsafe float ComputeSnapThresholdForActiveItem()
+    {
+      if (HousingStructure == null) { SnapThresholdDiagnostic = "no housing structure"; return 0f; }
+      var active = HousingStructure->ActiveItem;
+      if (active == null) { SnapThresholdDiagnostic = "no active item"; return 0f; }
+
+      var instances = active->Instances.Instances;
+      var size = (int)(instances.Last - instances.First);
+      var totalChildren = size;
+
+      float minThreshold = float.PositiveInfinity;
+      int childrenWithThreshold = 0;
+      string firstSource = "(none)";
+
+      for (int i = 0; i < size; i++)
+      {
+        var childPtr = instances.First[i];
+        if (childPtr.Value == null) continue;
+        var childInstance = childPtr.Value->Instance;
+        if (childInstance == null) continue;
+        if (childInstance->Id.Type != InstanceType.BgPart) continue;
+
+        var bgPart = (BgPartsLayoutInstance*)childInstance;
+        var collider = bgPart->Collider;
+        if (collider == null) continue;
+
+        float childThreshold = 0f;
+        string source = "";
+
+        var colliderType = collider->GetColliderType();
+        if (colliderType == ColliderType.Mesh)
+        {
+          var meshCol = (ColliderMesh*)collider;
+          var mesh = meshCol->Mesh;
+          if (mesh != null)
+          {
+            var meshPCB = (MeshPCB*)mesh;
+            var rootNode = meshPCB->RootNode;
+            if (rootNode != null)
+            {
+              var lb = rootNode->LocalBounds;
+              var lbW = lb.Max.X - lb.Min.X;
+              var lbD = lb.Max.Z - lb.Min.Z;
+              if (lbW > 0f && lbD > 0f)
+              {
+                childThreshold = System.Math.Min(lbW, lbD) * 0.5f;
+                source = "mesh.LocalBounds";
+              }
+            }
+          }
+        }
+        else if (colliderType == ColliderType.Box
+              || colliderType == ColliderType.Cylinder
+              || colliderType == ColliderType.Sphere
+              || colliderType == ColliderType.Plane)
+        {
+          // Analytic shape: local bounds are unit (-1..1), Scale at offset 0xD8 is
+          // the half-extent. min(scaleX, scaleZ) directly = snap distance.
+          var scale = *(Vector3*)((byte*)collider + 0xD8);
+          if (scale.X > 0f && scale.Z > 0f)
+          {
+            childThreshold = System.Math.Min(scale.X, scale.Z);
+            source = $"{colliderType}.Scale";
+          }
+        }
+        // Streamed colliders (terrain etc.) aren't applicable to placeable furniture.
+
+        if (childThreshold > 0f)
+        {
+          if (childrenWithThreshold == 0) firstSource = source;
+          if (childThreshold < minThreshold) minThreshold = childThreshold;
+          childrenWithThreshold++;
+        }
+      }
+
+      if (childrenWithThreshold > 0)
+      {
+        SnapThresholdDiagnostic = $"{firstSource} -> {minThreshold:0.######} ({childrenWithThreshold}/{totalChildren} children)";
+        return minThreshold;
+      }
+
+      SnapThresholdDiagnostic = $"no usable colliders (children: {totalChildren})";
+      return 0f;
+    }
+
+    /// <summary>
+    /// Casts a ray straight down from the active item's position and returns
+    /// the distance to the nearest collision surface. Used by snap detection
+    /// to know whether the item is close enough to the ground to be snapped.
+    /// </summary>
+    /// <returns>Distance in game units to the nearest surface below, or
+    /// <see cref="float.PositiveInfinity"/> if no collision was found / no item is active.</returns>
+    /// <remarks>
+    /// The ray origin is lifted slightly above the item's pivot to avoid starting
+    /// inside collision geometry (housing items often pivot at their base). The
+    /// returned distance accounts for that lift, so it represents the gap from
+    /// the item's actual base to the surface beneath it.
+    /// </remarks>
+    public unsafe float GetDistanceToFloorBelow()
+    {
+      if (HousingStructure == null || HousingStructure->ActiveItem == null)
+      {
+        LastFloorRaycastHit = false;
+        LastFloorRaycastDistance = float.PositiveInfinity;
+        LastCeilingRaycastHit = false;
+        LastCeilingRaycastDistance = float.PositiveInfinity;
+        return float.PositiveInfinity;
+      }
+
+      var active = HousingStructure->ActiveItem;
+      var pos = active->Transform.Translation;
+
+      // Find lowest and highest Y across the item's child colliders (world space).
+      // We need lowest for downward raycast (cast from just below the item) and
+      // highest for upward-snap detection.
+      float lowestY = float.PositiveInfinity;
+      float highestY = float.NegativeInfinity;
+      var instances = active->Instances.Instances;
+      var size = (int)(instances.Last - instances.First);
+      for (int i = 0; i < size; i++)
+      {
+        var childPtr = instances.First[i];
+        if (childPtr.Value == null) continue;
+        var ci = childPtr.Value->Instance;
+        if (ci == null) continue;
+        if (ci->Id.Type != InstanceType.BgPart) continue;
+        var bgPart = (BgPartsLayoutInstance*)ci;
+        var collider = bgPart->Collider;
+        if (collider == null) continue;
+        AABB worldBB = default;
+        collider->GetWorldBB(&worldBB);
+        if (worldBB.Min.Y < lowestY) lowestY = worldBB.Min.Y;
+        if (worldBB.Max.Y > highestY) highestY = worldBB.Max.Y;
+      }
+
+      // Fall back to pivot if no world BB could be read.
+      if (float.IsPositiveInfinity(lowestY)) lowestY = pos.Y;
+      if (float.IsNegativeInfinity(highestY)) highestY = pos.Y;
+
+      const float Epsilon = 0.001f;
+
+      // === Downward ray: distance to floor below the item ===
+      // Raycast handles all surfaces below correctly (floors are upward-facing
+      // and visible to downward rays, and so are tabletops, stairs, etc.).
+      var downOrigin = new Vector3(pos.X, lowestY - Epsilon, pos.Z);
+      var downDir = new Vector3(0f, -1f, 0f);
+      float floorGap = float.PositiveInfinity;
+      if (BGCollisionModule.RaycastMaterialFilter(downOrigin, downDir, out var downHit, 100f))
+      {
+        floorGap = downHit.Distance + (pos.Y - lowestY) + Epsilon;
+        if (floorGap < 0f) floorGap = 0f;
+        LastFloorRaycastHit = true;
+        LastFloorRaycastDistance = floorGap;
+      }
+      else
+      {
+        LastFloorRaycastHit = false;
+        LastFloorRaycastDistance = float.PositiveInfinity;
+      }
+
+      // === Upward direction: lookup-based ===
+      // Upward floor surfaces have one-sided collision (only collide from above),
+      // so an upward raycast passes through them. Instead, we use known floor-Y
+      // values for housing interiors: basement -7, ground 0, upper +7.
+      // For each known floor above the item's top, compute the distance.
+      // Take the minimum across all candidate floors.
+      //
+      // This also handles the "tall item spans floor" case: if a known floor Y
+      // is between item.bottom and item.top, the item's body intersects with
+      // that floor surface, and the engine treats the item as a candidate to
+      // snap to that floor. We report distance = 0 in that case (snap is
+      // imminent/inevitable).
+      float ceilingGap = float.PositiveInfinity;
+      bool foundUpwardSnap = false;
+
+      // Only do the lookup when we're inside a housing interior (basement/ground/upper).
+      // Outdoor plots and FC rooms don't have multiple floor levels in the same way.
+      // We approximate this by checking if there are any known floors that could be
+      // relevant given the item's position — i.e., any floor Y >= item bottom.
+      if (HousingModule != null && HousingModule->IndoorTerritory != null)
+      {
+        // The three known indoor housing floor Y values, hardcoded based on
+        // measurements across all housing sizes (FC rooms, small/medium/large).
+        // Values are constant across housing types — only which subset is present
+        // varies (FC rooms have only Y=0; small/medium have Y=-7 and 0; large
+        // has all three). We test all three; floors that don't exist in the
+        // current house simply won't be near the item.
+        var knownFloors = stackalloc float[] { -7f, 0f, 7f };
+        for (int f = 0; f < 3; f++)
+        {
+          var floorY = knownFloors[f];
+
+          // Spans-floor case: floor Y is between item bottom and item top.
+          // The item physically overlaps this floor surface — engine may snap
+          // it onto this floor. Report distance = 0 (in snap zone unconditionally).
+          if (floorY >= lowestY && floorY <= highestY)
+          {
+            ceilingGap = 0f;
+            foundUpwardSnap = true;
+            break;
+          }
+
+          // Floor-above case: floor Y is above the item's top. Distance from
+          // item.top up to this floor.
+          if (floorY > highestY)
+          {
+            var gap = floorY - highestY;
+            if (gap < ceilingGap)
+            {
+              ceilingGap = gap;
+              foundUpwardSnap = true;
+            }
+          }
+          // Floor-below case is already handled by the downward raycast above.
+        }
+      }
+
+      LastCeilingRaycastHit = foundUpwardSnap;
+      LastCeilingRaycastDistance = ceilingGap;
+
+      // Return whichever surface is closer — engine snaps to whichever is nearest.
+      return System.Math.Min(floorGap, ceilingGap);
+    }
+
+    /// <summary>
+    /// Walks a housing item's child layout instances looking for a SphereCastRange
+    /// (LayerEntryType 0x4B) child and returns Cast.X — the engine's authored snap
+    /// distance override in yalms. Validated against Housingway's implementation
+    /// and 106 extracted .sgb blocks. Returns null when the item has no such child
+    /// or the instance children aren't loaded yet.
+    /// </summary>
+    public static unsafe float? GetSphereCastRangeOverride(SharedGroupLayoutInstance* group)
+    {
+      if (group == null) return null;
+      var instances = group->Instances.Instances;
+      var size = (int)(instances.Last - instances.First);
+      for (int i = 0; i < size; i++)
+      {
+        var childPtr = instances.First[i];
+        if (childPtr.Value == null) continue;
+        var ci = childPtr.Value->Instance;
+        if (ci == null) continue;
+        if (ci->Id.Type != InstanceType.SphereCastRange) continue;
+
+        var scr = (SphereCastRangeData*)ci;
+        var x = scr->Cast.X;
+        // Reject absurd values (zeroed/unloaded instances); real overrides are 0.001..2.7.
+        if (float.IsFinite(x) && x > 0f && x < 100f) return x;
+        return null;
+      }
+      return null;
+    }
+
+    /// <summary>
+    /// Scans placed housing objects for the nearest item that can receive an
+    /// item-to-item snap. Both sides' distances come from SphereCastRange
+    /// overrides (runtime read, embedded-table fallback); items without one
+    /// don't participate. Result is exposed for the warning banner + debug panel.
+    /// </summary>
+    public unsafe void UpdateItemSnapDetection()
+    {
+      LastItemSnapHit = false;
+      LastItemSnapDistance = float.PositiveInfinity;
+      LastItemSnapEffectiveRange = 0f;
+      LastItemSnapTargetItemId = 0;
+      LastItemSnapTargetName = "";
+
+      if (HousingStructure == null || HousingStructure->ActiveItem == null ||
+          HousingModule == null || HousingModule->GetCurrentManager() == null ||
+          HousingModule->GetCurrentManager()->Objects == null)
+      {
+        ItemSnapDiagnostic = "no housing/active item";
+        return;
+      }
+
+      var active = HousingStructure->ActiveItem;
+      var activePos = active->Transform.Translation;
+      var activeItemId = GetActiveItemFFXIVId();
+
+      // Active item's own range (runtime first, table fallback).
+      float activeRange = 0f;
+      var activeRuntime = GetSphereCastRangeOverride(active);
+      if (activeRuntime.HasValue)
+      {
+        activeRange = activeRuntime.Value;
+        ActiveItemSphereCastSource = "runtime";
+      }
+      else if (activeItemId != 0 && SnapRangeData.TryGetSnapRange(activeItemId, out var atr))
+      {
+        activeRange = atr;
+        ActiveItemSphereCastSource = "sgb table";
+      }
+      else
+      {
+        ActiveItemSphereCastSource = "(none)";
+      }
+
+      var config = Plugin.GetConfiguration();
+      var safety = config.SnapThreshold;
+      var mode = config.ItemSnapRangeMode;
+
+      float bestDist = float.PositiveInfinity;
+      float bestEffective = 0f;
+      uint bestId = 0;
+      string bestName = "";
+      int scanned = 0;
+      int withRange = 0;
+
+      for (var i = 0; i < 600; i++)
+      {
+        var addr = HousingModule->GetCurrentManager()->Objects[i];
+        if (addr == 0) continue;
+        var go = (GameObject*)addr;
+        if (go->SharedGroupLayoutInstance == active) continue; // skip the dragged item itself
+
+        var dist = Vector3.Distance(activePos, go->Position);
+        if (dist > 8f) continue; // max known range 2.7 (+sum mode) — cheap early-out
+
+        scanned++;
+
+        // Resolve this placed item's identity (cached per furniture row).
+        var rowId = go->BaseId;
+        if (!_furnitureRowCache.TryGetValue(rowId, out var cached))
+        {
+          uint itemId = 0;
+          string name = "";
+          if (Plugin.TryGetFurnishing(rowId, out var f))
+          {
+            itemId = f.Item.Value.RowId;
+            name = f.Item.Value.Name.ExtractText();
+          }
+          else if (Plugin.TryGetYardObject(rowId, out var y))
+          {
+            itemId = y.Item.Value.RowId;
+            name = y.Item.Value.Name.ExtractText();
+          }
+          cached = (itemId, name);
+          _furnitureRowCache[rowId] = cached;
+        }
+
+        if (cached.ItemId == 0) continue;
+
+        // Placed item's range: runtime SphereCastRange first, table fallback.
+        float placedRange = 0f;
+        var placedRuntime = GetSphereCastRangeOverride(go->SharedGroupLayoutInstance);
+        if (placedRuntime.HasValue) placedRange = placedRuntime.Value;
+        else if (SnapRangeData.TryGetSnapRange(cached.ItemId, out var ptr2)) placedRange = ptr2;
+
+        if (placedRange <= 0f && activeRange <= 0f) continue;
+        withRange++;
+
+        var effective = mode switch
+        {
+          ItemSnapRangeMode.Sum => activeRange + placedRange,
+          ItemSnapRangeMode.PlacedOnly => placedRange,
+          _ => System.Math.Max(activeRange, placedRange),
+        };
+        if (effective <= 0f) continue;
+
+        if (dist <= effective + safety && dist < bestDist)
+        {
+          bestDist = dist;
+          bestEffective = effective;
+          bestId = cached.ItemId;
+          bestName = cached.Name;
+        }
+      }
+
+      ItemSnapDiagnostic = $"scanned {scanned} nearby ({withRange} snap-capable), active range {activeRange:0.####} [{ActiveItemSphereCastSource}], mode {mode}";
+
+      if (bestId != 0)
+      {
+        LastItemSnapHit = true;
+        LastItemSnapDistance = bestDist;
+        LastItemSnapEffectiveRange = bestEffective;
+        LastItemSnapTargetItemId = bestId;
+        LastItemSnapTargetName = bestName;
+      }
+    }
+
+    /// <summary>
+    /// Wall-mounted items snap to walls using their TargetMarker children: the
+    /// engine's wall snap distance is (max XZ distance from the item pivot to a
+    /// TargetMarker) x 0.5, matching Housingway's shipped implementation for
+    /// HousingItemCategory == 15 items. Returns null when no TargetMarker exists.
+    /// </summary>
+    public static unsafe float? GetWallTargetMarkerDistance(SharedGroupLayoutInstance* group, Vector3 pos)
+    {
+      if (group == null) return null;
+      var instances = group->Instances.Instances;
+      var size = (int)(instances.Last - instances.First);
+
+      float max = float.MinValue;
+      var found = false;
+      for (int i = 0; i < size; i++)
+      {
+        var childPtr = instances.First[i];
+        if (childPtr.Value == null) continue;
+        var ci = childPtr.Value->Instance;
+        if (ci == null) continue;
+        if (ci->Id.Type != InstanceType.TargetMarker) continue;
+
+        found = true;
+        var transform = *ci->GetTransformImpl();
+        var dx = pos.X - transform.Translation.X;
+        var dz = pos.Z - transform.Translation.Z;
+        var dist = MathF.Sqrt(dx * dx + dz * dz);
+        if (dist > max) max = dist;
+      }
+
+      if (!found) return null;
+      return MathF.Abs(MathF.Round(max, 2)) * 0.5f;
+    }
+
+    /// <summary>
+    /// Walks a MeshPCB node tree looking for any per-primitive material carrying
+    /// the TableTop flag (nibble d4 == 8 — bits 16..19 of the material value).
+    /// Mirrors Housingway's GetAllMaterialValue primitive OR walk.
+    /// </summary>
+    private static unsafe bool MeshHasTableTopPrim(MeshPCB.FileNode* node, int depth)
+    {
+      while (node != null && depth < 64)
+      {
+        var prims = node->PrimitivesPtr;
+        for (int i = 0; i < node->NumPrims; i++)
+        {
+          if (((prims[i].Material >> 16) & 0xF) == 8) return true;
+        }
+        if (node->Child1 != null && MeshHasTableTopPrim(node->Child1, depth + 1)) return true;
+        node = node->Child2;
+        depth++;
+      }
+      return false;
+    }
+
+    /// <summary>True if the item's ItemUICategory is 78 (Tabletop).</summary>
+    private bool IsTabletopItem(uint itemId)
+    {
+      if (_itemUICategoryCache.TryGetValue(itemId, out var cat)) return cat == 78;
+      uint resolved = 0;
+      try
+      {
+        var row = Plugin.Data.GetExcelSheet<Lumina.Excel.Sheets.Item>().GetRowOrDefault(itemId);
+        if (row.HasValue) resolved = row.Value.ItemUICategory.Value.RowId;
+      }
+      catch
+      {
+        // Sheet unavailable — treat as not tabletop.
+      }
+      _itemUICategoryCache[itemId] = resolved;
+      return resolved == 78;
+    }
+
+    /// <summary>
+    /// Table snap: the engine attaches tabletop items (ItemUICategory 78) onto
+    /// TableTop-flagged collision meshes of nearby placed furniture. Fires when
+    /// the active item is a tabletop item and a nearby receiver's surface sits
+    /// within the snap margin of the item's pivot.
+    /// </summary>
+    public unsafe void UpdateTableSnapDetection()
+    {
+      LastTableSnapHit = false;
+      LastTableSnapTargetName = "";
+      LastTableSnapDeltaY = float.PositiveInfinity;
+      LastTableSnapSurfaceY = 0f;
+
+      if (HousingStructure == null || HousingStructure->ActiveItem == null ||
+          HousingModule == null || HousingModule->GetCurrentManager() == null ||
+          HousingModule->GetCurrentManager()->Objects == null)
+      {
+        TableSnapDiagnostic = "no housing/active item";
+        return;
+      }
+
+      var active = HousingStructure->ActiveItem;
+      var pos = active->Transform.Translation;
+      var activeItemId = GetActiveItemFFXIVId();
+
+      if (activeItemId == 0 || !IsTabletopItem(activeItemId))
+      {
+        TableSnapDiagnostic = $"active item not tabletop (category {_cachedActiveItemCategory})";
+        return;
+      }
+
+      var config = Plugin.GetConfiguration();
+      var margin = config.SnapThreshold + 0.05f;
+
+      var candidates = GetNearbyTableSurfaces();
+      float best = float.PositiveInfinity;
+      string bestName = "";
+      float bestSurfaceY = 0f;
+      foreach (var t in candidates)
+      {
+        var dy = System.Math.Abs(t.TopY - pos.Y);
+        if (dy <= margin && dy < best)
+        {
+          best = dy;
+          bestName = t.Name;
+          bestSurfaceY = t.TopY;
+        }
+      }
+
+      TableSnapDiagnostic = $"{candidates.Count} TableTop receiver(s) nearby, item pivot Y {pos.Y:0.###}, margin {margin:0.###}";
+
+      if (best != float.PositiveInfinity)
+      {
+        LastTableSnapHit = true;
+        LastTableSnapTargetName = bestName;
+        LastTableSnapDeltaY = best;
+        LastTableSnapSurfaceY = bestSurfaceY;
+      }
+    }
+
+    /// <summary>
+    /// Debug: lists placed items near the active item whose collision meshes carry
+    /// the TableTop material flag (nibble d4 == 8 per the Re:MakePlace dev's
+    /// material table). These are the surfaces tabletop items snap onto — the
+    /// third snap component (regular edge/2, SphereCastRange override, table snap).
+    /// </summary>
+    public unsafe List<(string Name, float TopY, float Distance)> GetNearbyTableSurfaces(float maxDistance = 4f)
+    {
+      var results = new List<(string, float, float)>();
+
+      if (HousingStructure == null || HousingStructure->ActiveItem == null ||
+          HousingModule == null || HousingModule->GetCurrentManager() == null ||
+          HousingModule->GetCurrentManager()->Objects == null)
+        return results;
+
+      var active = HousingStructure->ActiveItem;
+      var activePos = active->Transform.Translation;
+
+      for (var i = 0; i < 600; i++)
+      {
+        var addr = HousingModule->GetCurrentManager()->Objects[i];
+        if (addr == 0) continue;
+        var go = (GameObject*)addr;
+        if (go->SharedGroupLayoutInstance == active) continue;
+
+        var dist = Vector3.Distance(activePos, go->Position);
+        if (dist > maxDistance) continue;
+
+        var rowId = go->BaseId;
+        if (!_furnitureRowCache.TryGetValue(rowId, out var cached))
+        {
+          uint itemId = 0;
+          string name = "";
+          if (Plugin.TryGetFurnishing(rowId, out var f))
+          {
+            itemId = f.Item.Value.RowId;
+            name = f.Item.Value.Name.ExtractText();
+          }
+          else if (Plugin.TryGetYardObject(rowId, out var y))
+          {
+            itemId = y.Item.Value.RowId;
+            name = y.Item.Value.Name.ExtractText();
+          }
+          cached = (itemId, name);
+          _furnitureRowCache[rowId] = cached;
+        }
+        if (cached.ItemId == 0) continue;
+
+        // Walk the placed item's children for a TableTop-flagged mesh collider.
+        var group = go->SharedGroupLayoutInstance;
+        if (group == null) continue;
+        var instances = group->Instances.Instances;
+        var size = (int)(instances.Last - instances.First);
+
+        float topY = float.NegativeInfinity;
+        for (int c = 0; c < size; c++)
+        {
+          var childPtr = instances.First[c];
+          if (childPtr.Value == null) continue;
+          var ci = childPtr.Value->Instance;
+          if (ci == null) continue;
+          if (ci->Id.Type != InstanceType.BgPart) continue;
+
+          var bgPart = (BgPartsLayoutInstance*)ci;
+          var collider = bgPart->Collider;
+          if (collider == null) continue;
+          if (collider->GetColliderType() != ColliderType.Mesh) continue;
+
+          // TableTop material flag: nibble d4 == 8 in CollisionMaterialIdLow,
+          // OR per-primitive materials for mesh colliders (bits 16..19).
+          var d4 = (int)((bgPart->CollisionMaterialIdLow >> 16) & 0xF);
+          var tableTop = d4 == 8;
+          if (!tableTop)
+          {
+            var meshCol = (ColliderMesh*)collider;
+            if (!meshCol->MeshIsSimple && meshCol->Mesh != null)
+            {
+              var pcb = (MeshPCB*)meshCol->Mesh;
+              if (pcb->RootNode != null)
+                tableTop = MeshHasTableTopPrim(pcb->RootNode, 0);
+            }
+          }
+          if (!tableTop) continue;
+
+          AABB worldBB = default;
+          collider->GetWorldBB(&worldBB);
+          if (worldBB.Max.Y > topY) topY = worldBB.Max.Y;
+        }
+
+        if (!float.IsNegativeInfinity(topY))
+          results.Add((cached.Name, topY, dist));
+      }
+
+      return results;
+    }
+
+    /// <summary>
+    /// Returns the FFXIV Item RowId of the currently selected housing item,
+    /// or 0 if no item is selected or the lookup fails. This is the ID format
+    /// used by Lumina's Item sheet — suitable for SnapData lookups.
+    /// </summary>
+    public unsafe uint GetActiveItemFFXIVId()
+    {
+      if (HousingStructure == null)
+        return 0;
+      var active = HousingStructure->ActiveItem;
+      if (active == null)
+      {
+        _cachedActiveItemPtr = null;
+        _cachedActiveItemId = 0;
+        _cachedActiveItemCategory = 0;
+        ActiveItemSnapThreshold = 0f;
+        return 0;
+      }
+
+      // Cache hit — same selected item as last query.
+      if (_cachedActiveItemPtr == (void*)active)
+        return _cachedActiveItemId;
+
+      _cachedActiveItemPtr = (void*)active;
+      _cachedActiveItemId = 0;
+
+      // Walk the housing object array, find the GameObject whose
+      // SharedGroupLayoutInstance pointer matches the active item.
+      if (HousingModule == null || HousingModule->GetCurrentManager() == null || HousingModule->GetCurrentManager()->Objects == null)
+      {
+        ActiveItemSnapThreshold = ComputeSnapThresholdForActiveItem();
+        return 0;
+      }
+
+      for (var i = 0; i < 600; i++)
+      {
+        var addr = HousingModule->GetCurrentManager()->Objects[i];
+        if (addr == 0) continue;
+
+        var go = (GameObject*)addr;
+        if (go->SharedGroupLayoutInstance != active) continue;
+
+        // Found the matching GameObject. Its BaseId is the HousingFurniture
+        // row ID; resolve through the loaded furniture sheet to get the
+        // actual Item.RowId (which is what Re:MakePlace's data is keyed on).
+        var furnitureRowId = go->BaseId;
+        if (Plugin.TryGetFurnishing(furnitureRowId, out var furniture))
+        {
+          _cachedActiveItemId = furniture.Item.Value.RowId;
+          _cachedActiveItemCategory = (uint)furniture.HousingItemCategory;
+        }
+        else if (Plugin.TryGetYardObject(furnitureRowId, out var yard))
+        {
+          _cachedActiveItemId = yard.Item.Value.RowId;
+          _cachedActiveItemCategory = (uint)yard.HousingItemCategory;
+        }
+        break;
+      }
+
+      // Now that we know the item ID, capture the snap threshold. Priority:
+      // 1. Manual override (/hu learn) — user-measured, always wins.
+      // 2. SphereCastRange override read at runtime (sgb type 0x4B -> Cast.X).
+      // 3. Embedded .sgb table fallback (instance children may not be streamed in).
+      // 4. Regular snap: shortest-edge / 2 from the collider footprint.
+      var config = Plugin.GetConfiguration();
+      if (_cachedActiveItemId != 0 && config.SnapOverrides.TryGetValue(_cachedActiveItemId, out var overridden))
+      {
+        ActiveItemSnapThreshold = overridden;
+        SnapThresholdDiagnostic = $"override (manual /hu learn) -> {overridden:0.###}";
+      }
+      else
+      {
+        var runtimeRange = GetSphereCastRangeOverride(active);
+        if (runtimeRange.HasValue)
+        {
+          ActiveItemSnapThreshold = runtimeRange.Value;
+          ActiveItemSphereCastSource = "runtime";
+          SnapThresholdDiagnostic = $"SphereCastRange override (runtime) -> {runtimeRange.Value:0.####}";
+        }
+        else if (_cachedActiveItemId != 0 && SnapRangeData.TryGetSnapRange(_cachedActiveItemId, out var tableRange))
+        {
+          ActiveItemSnapThreshold = tableRange;
+          ActiveItemSphereCastSource = "sgb table";
+          SnapThresholdDiagnostic = $"SphereCastRange override (sgb table) -> {tableRange:0.####}";
+        }
+        else if (_cachedActiveItemCategory == 15)
+        {
+          // Wall-mounted item: the engine's wall snap distance comes from the
+          // item's TargetMarker children (max XZ distance from pivot x 0.5) —
+          // Housingway-validated. Falls back to the footprint formula if the
+          // item has no TargetMarker.
+          ActiveItemSphereCastSource = "(none)";
+          var wallDist = GetWallTargetMarkerDistance(active, active->Transform.Translation);
+          if (wallDist.HasValue)
+          {
+            ActiveItemSnapThreshold = wallDist.Value;
+            SnapThresholdDiagnostic = $"wall TargetMarker -> {wallDist.Value:0.####}";
+          }
+          else
+          {
+            ActiveItemSnapThreshold = ComputeSnapThresholdForActiveItem();
+          }
+        }
+        else
+        {
+          ActiveItemSphereCastSource = "(none)";
+          ActiveItemSnapThreshold = ComputeSnapThresholdForActiveItem();
+        }
+      }
+
+      return _cachedActiveItemId;
+    }
+
+    /// <summary>
+    /// Writes the position vector to memory.
+    /// </summary>
+    /// <param name="newPosition">Position vector to write.</param>
+    public unsafe void WritePosition(Vector3 newPosition)
+    {
+      // Don't write if housing mode isn't on.
+      if (!CanEditItem())
+        return;
+
+      try
+      {
+        var item = HousingStructure->ActiveItem;
+        if (item == null)
+          return;
+
+        // Set the position.
+        item->Transform.Translation = newPosition;
+      }
+      catch (Exception ex)
+      {
+        Plugin.Log.Error(ex, "Error occured while writing position!");
+      }
+    }
+
+    public unsafe void WriteRotation(Vector3 newRotation)
+    {
+      // Don't write if housing mode isn't on.
+      if (!CanEditItem())
+        return;
+
+      try
+      {
+        var item = HousingStructure->ActiveItem;
+        if (item == null)
+          return;
+
+        // Convert into a quaternion.
+        item->Transform.Rotation = Util.ToQ(newRotation);
+      }
+      catch (Exception ex)
+      {
+        Plugin.Log.Error(ex, "Error occured while writing rotation!");
+      }
+    }
+
+    /// <summary>
+    /// Thread loop for reading memory.
+    /// </summary>
+    public unsafe void Update()
+    {
+      try
+      {
+        var lastIsHousingOpen = _isHousingOpen;
+        _isHousingOpen = IsHousingOpen();
+
+        // Just perform once when housing is opened
+        if (lastIsHousingOpen != _isHousingOpen && _isHousingOpen)
+        {
+          var config = Plugin.GetConfiguration();
+          if (!config.DisplayFurnishingList)
+            AtkManager.ShowFurnishingList(false);
+          if (!config.DisplayInventory)
+            AtkManager.ShowInventory(false);
+        }
+
+        if (!CanEditItem())
+          return;
+
+        // Don't really need to load position if we're reading it in the UI thread anyway, but leaving it for now for redudency...
+        Position = ReadPosition();
+        Rotation = ReadRotation();
+
+        // Update the model of active item, the game doesn't do this for wall mounted and outside in rotate mode
+        var item = HousingStructure->ActiveItem;
+        if (item != null)
+          HousingLayoutModelUpdate((IntPtr)item + 0x80);
+      }
+      catch (PluginException)
+      {
+        Position = Vector3.Zero;
+        Rotation = Vector3.Zero;
+      }
+      catch (Exception ex)
+      {
+        Plugin.Log.Error(ex, "Unknown exception");
+        Position = Vector3.Zero;
+        Rotation = Vector3.Zero;
+      }
+    }
+
+    /// <summary>
+    /// Get furnishings as they appear in the array in memory.
+    /// </summary>
+    /// <param name="objects"></param>
+    /// <param name="point"></param>
+    /// <param name="sortByDistance"></param>
+    /// <returns></returns>
+    public unsafe bool GetFurnishings(out List<GameObject> objects, Vector3 point, bool sortByDistance = false)
+    {
+      // Initialize the output to empty for the sake of noticing an error
+      objects = [];
+
+      // Exit early due to missing addresses
+      if (HousingModule == null || HousingModule->GetCurrentManager() == null || HousingModule->GetCurrentManager()->Objects == null)
+        return false;
+
+      // Create a list of game objects and their distance from the player
+      var furnishings = new List<(GameObject gameObject, float distance)>();
+      // Iterate over array size, max furnishing size (600 as of Dawntrail)
+      for (var i = 0; i < 600; i++)
+      {
+        // Get the object from the array
+        var objectAddress = HousingModule->GetCurrentManager()->Objects[i];
+        if (objectAddress == 0)
+          continue;
+        // Cast the address to a GameObject
+        var gameObject = *(GameObject*)objectAddress;
+        // Add to the objects including distance from player
+        furnishings.Add((gameObject, Util.DistanceFromPlayer(gameObject, point)));
+      }
+
+      // Pre-sort the objects
+      if (sortByDistance)
+        furnishings.Sort((obj1, obj2) => obj1.distance.CompareTo(obj2.distance));
+
+      // Set the output variable to just the game objects
+      objects = furnishings.Select(obj => obj.gameObject).ToList();
+
+      return true;
+    }
+
+    public static byte[] ReadBytes(IntPtr addr, int length)
+    {
+      var bytes = new byte[length];
+      Marshal.Copy(addr, bytes, 0, length);
+      return bytes;
+    }
+
+    public static void WriteProtectedBytes(IntPtr addr, byte[] b)
+    {
+      if (addr == IntPtr.Zero)
+        return;
+      VirtualProtect(addr, 1, Protection.PAGE_EXECUTE_READWRITE, out var oldProtection);
+      Marshal.Copy(b, 0, addr, b.Length);
+      VirtualProtect(addr, 1, oldProtection, out _);
+    }
+
+    public static void WriteProtectedBytes(IntPtr addr, byte b)
+    {
+      if (addr == IntPtr.Zero)
+        return;
+      WriteProtectedBytes(addr, [b]);
+    }
+
+    /// <summary>
+    /// Sets the flag for place anywhere in memory.
+    /// </summary>
+    /// <param name="state">Boolean state for if you can place anywhere.</param>
+    public static void SetPlaceAnywhere(bool state)
+    {
+      PlaceAnywhere.SetState(state);
+      ShowcaseAnywhere.SetState(state);
+    }
+
+    #region Kernel32
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool VirtualProtect(IntPtr lpAddress, uint dwSize, Protection flNewProtect, out Protection lpflOldProtect);
+
+    private enum Protection
+    {
+      // PAGE_NOACCESS = 0x01,
+      // PAGE_READONLY = 0x02,
+      // PAGE_READWRITE = 0x04,
+      // PAGE_WRITECOPY = 0x08,
+      // PAGE_EXECUTE = 0x10,
+      // PAGE_EXECUTE_READ = 0x20,
+      PAGE_EXECUTE_READWRITE = 0x40,
+      // PAGE_EXECUTE_WRITECOPY = 0x80,
+      // PAGE_GUARD = 0x100,
+      // PAGE_NOCACHE = 0x200,
+      // PAGE_WRITECOMBINE = 0x400
+    }
+    #endregion
+  }
+}

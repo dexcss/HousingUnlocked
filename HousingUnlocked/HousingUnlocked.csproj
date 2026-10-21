@@ -1,0 +1,20 @@
+<Project Sdk="Dalamud.NET.Sdk/15.0.0">
+  <PropertyGroup>
+    <Version>1.1.0.0</Version>
+    <AssemblyName>HousingUnlocked</AssemblyName>
+    <RootNamespace>HousingUnlocked</RootNamespace>
+    <Product>Housing Unlocked</Product>
+    <Authors>dexcss</Authors>
+    <Description>Housing placement toolkit for FFXIV: snap warnings for floor, items and tables, powered by the game's own SphereCastRange data.</Description>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <LangVersion>latest</LangVersion>
+    <ProduceReferenceAssembly>false</ProduceReferenceAssembly>
+    <PreserveCompilationContext>false</PreserveCompilationContext>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Update="HousingUnlocked.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+</Project>

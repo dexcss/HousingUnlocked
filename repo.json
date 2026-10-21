@@ -1,0 +1,30 @@
+[
+  {
+    "Author": "dexcss",
+    "Name": "Housing Unlocked",
+    "Punchline": "See every snap before it happens.",
+    "Description": "Housing placement toolkit for FFXIV. Know before you place: floor-snap warnings from the engine's own collision data, item-to-item snap warnings from each item's SphereCastRange block, and table-snap warnings from TableTop collision surfaces. Full position/rotation control on top, inherited from BDTH by LeonBlade. Open with /hu.",
+    "InternalName": "HousingUnlocked",
+    "AssemblyVersion": "1.1.0.0",
+    "TestingAssemblyVersion": "1.1.0.0",
+    "RepoUrl": "https://github.com/dexcss/HousingUnlocked",
+    "ApplicableVersion": "any",
+    "DalamudApiLevel": 15,
+    "Tags": [
+      "housing",
+      "furnishing",
+      "snap",
+      "place",
+      "float",
+      "table",
+      "wall"
+    ],
+    "CategoryTags": [
+      "Utility"
+    ],
+    "IconUrl": "https://raw.githubusercontent.com/dexcss/HousingUnlocked/main/images/icon.png",
+    "DownloadLinkInstall": "https://github.com/dexcss/HousingUnlocked/releases/latest/download/HousingUnlocked.zip",
+    "DownloadLinkTesting": "https://github.com/dexcss/HousingUnlocked/releases/latest/download/HousingUnlocked.zip",
+    "DownloadLinkUpdate": "https://github.com/dexcss/HousingUnlocked/releases/latest/download/HousingUnlocked.zip"
+  }
+]
