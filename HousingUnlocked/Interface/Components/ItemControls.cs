@@ -46,7 +46,24 @@ namespace HousingUnlocked.Interface.Components
       // and currently within the per-item snap distance derived from its collider footprint.
       var activeItemId = Memory.GetActiveItemFFXIVId();
       var isFloorSnapItem = activeItemId != 0 && SnapData.HasFloorSnap(activeItemId);
-      var distanceToFloor = isFloorSnapItem ? Memory.GetDistanceToFloorBelow() : float.PositiveInfinity;
+      var floorD = float.PositiveInfinity;
+      var ceilD = float.PositiveInfinity;
+      var distanceToFloor = float.PositiveInfinity;
+      if (isFloorSnapItem)
+      {
+        distanceToFloor = Memory.GetDistanceToFloorBelow();
+        floorD = Memory.LastFloorRaycastDistance;
+        ceilD = Memory.LastCeilingRaycastDistance;
+      }
+
+      // Direction-aware: the engine snaps toward the direction of travel. Pushing
+      // an item down targets the nearest surface BELOW (terrain and rocks included
+      // — the "sunken item, random rock" case); pulling up targets the floor above;
+      // stationary falls back to whichever is closer.
+      var dir = Memory.VerticalMoveDirection;
+      var snapsUp = dir > 0 ? true : dir < 0 ? false : ceilD < floorD;
+      var directionalDistance = snapsUp ? ceilD : floorD;
+
       // Per-item threshold from collision-mesh footprint: min(width, depth) / 2.
       // Falls back to the configurable global threshold if collider data isn't available
       // (e.g. item collider not yet loaded). Configurable threshold also applies as a
@@ -56,16 +73,14 @@ namespace HousingUnlocked.Interface.Components
         ? perItemThreshold + Configuration.SnapThreshold
         : Configuration.SnapThreshold;
       var inSnapZone = isFloorSnapItem && SnapData.IsInFloorSnapZone(
-        activeItemId, distanceToFloor, effectiveThreshold);
+        activeItemId, directionalDistance, effectiveThreshold);
 
       if (Configuration.ShowSnapWarning && isFloorSnapItem)
       {
         if (inSnapZone)
         {
-          // Determine which direction the snap will fire (whichever surface is closer).
-          var floorD = Memory.LastFloorRaycastDistance;
-          var ceilD = Memory.LastCeilingRaycastDistance;
-          var snapsUp = ceilD < floorD;
+          // Determine which direction the snap will fire (movement direction, or
+          // whichever surface is closer when stationary).
           ImGui.TextColored(RED, snapsUp ? "\u26A0 WILL SNAP UPWARD" : "\u26A0 WILL SNAP TO FLOOR");
         }
         else
@@ -74,12 +89,13 @@ namespace HousingUnlocked.Interface.Components
         {
           ImGui.BeginTooltip();
           ImGui.Text("This item is tagged as floor-snapping.");
+          ImGui.Text($"Vertical direction: {(dir < 0 ? "pushing down" : dir > 0 ? "pulling up" : "stationary")} — snap target follows movement.");
           if (Memory.LastFloorRaycastHit)
-            ImGui.Text($"Distance to floor below: {Memory.LastFloorRaycastDistance:0.###}");
+            ImGui.Text($"Distance to surface below (terrain included): {Memory.LastFloorRaycastDistance:0.###}");
           else
             ImGui.Text("No surface detected below the item (open air).");
           if (Memory.LastCeilingRaycastHit)
-            ImGui.Text($"Distance to ceiling above: {Memory.LastCeilingRaycastDistance:0.###}");
+            ImGui.Text($"Distance to floor above: {Memory.LastCeilingRaycastDistance:0.###}");
           else
             ImGui.Text("No surface detected above the item (open air).");
           if (perItemThreshold > 0f)

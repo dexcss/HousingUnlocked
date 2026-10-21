@@ -374,6 +374,23 @@ namespace HousingUnlocked
     // per Re:MakePlace's shipped item handling). Used for table-snap detection.
     private readonly Dictionary<uint, uint> _itemUICategoryCache = new();
 
+    // ==== Territory wall cache (the house's own walls — static geometry) ====
+    // The interior/exterior layout is static once loaded: walk it once per zone,
+    // cache every wall-flagged BgPart, then treat them like furniture receivers
+    // with the same one-sided triangle check.
+    private readonly List<(nint Instance, AABB WorldBB)> _territoryWallCache = new();
+    private DateTime _territoryWallCacheBuilt = DateTime.MinValue;
+    private uint _territoryWallCacheTerritory = 0;
+    private bool _territoryWallCacheDeep;
+    public string TerritoryWallCacheDiagnostic { get; private set; } = "(not built)";
+
+    // Vertical movement direction of the active item: -1 pushing down, +1 pulling
+    // up, 0 stationary. The engine snaps toward the direction of travel — pushing
+    // a sunken item down warns about terrain below (rocks), pulling up warns about
+    // the floor above — so warnings follow the direction instead of raw min().
+    public int VerticalMoveDirection { get; private set; } = 0;
+    private float _lastActiveY = float.NaN;
+
     // HousingItemCategory of the cached active item (15 = wall-mounted, per the
     // HousingFurniture/HousingYardObject sheets).
     private uint _cachedActiveItemCategory = 0;
@@ -1077,6 +1094,82 @@ namespace HousingUnlocked
     public unsafe List<(string Name, AABB BB, float Distance)> GetNearbyWallSurfaces(float maxDistance = 6f)
       => GetNearbySurfaces(20, 1, maxDistance, id => SnapRangeData.IsWallReceiver(id));
 
+    /// <summary>Invalidates the territory wall cache so the next wall check rebuilds it.</summary>
+    public void InvalidateTerritoryWallCache()
+    {
+      _territoryWallCacheBuilt = DateTime.MinValue;
+      _territoryWallCacheDeep = false;
+      _territoryWallCache.Clear();
+      TerritoryWallCacheDiagnostic = "(invalidated)";
+    }
+
+    /// <summary>
+    /// Builds (or refreshes) the territory wall cache: walks the active layout's
+    /// layers and caches every BgPart whose collider carries WallCollisionMesh.
+    /// Shallow pass uses object-level flags only; a deep pass adds per-primitive
+    /// walks and runs once if the shallow pass found nothing. House geometry is
+    /// static, so the cache is only rebuilt on territory change or age.
+    /// </summary>
+    private unsafe void EnsureTerritoryWallCache(bool allowDeep)
+    {
+      var lm = Layout != null ? *(LayoutManager**)((byte*)Layout + 0x20) : null; // LayoutWorld.ActiveLayout (0x020)
+      var tid = lm != null ? lm->TerritoryTypeId : 0;
+      var age = (DateTime.Now - _territoryWallCacheBuilt).TotalMinutes;
+
+      if (_territoryWallCacheBuilt != DateTime.MinValue &&
+          tid == _territoryWallCacheTerritory && age < 10 &&
+          (!allowDeep || _territoryWallCacheDeep))
+        return;
+
+      _territoryWallCache.Clear();
+      _territoryWallCacheTerritory = tid;
+      _territoryWallCacheBuilt = DateTime.Now;
+      if (allowDeep) _territoryWallCacheDeep = true;
+
+      int scanned = 0, walls = 0;
+      if (lm == null || lm->InitState != 7)
+      {
+        TerritoryWallCacheDiagnostic = "layout not ready";
+        return;
+      }
+
+      foreach (var layerPtr in lm->Layers.Values)
+      {
+        var layer = layerPtr.Value;
+        if (layer == null) continue;
+        foreach (var instPtr in layer->Instances.Values)
+        {
+          var inst = instPtr.Value;
+          if (inst == null) continue;
+          if (inst->Id.Type != InstanceType.BgPart) continue;
+          scanned++;
+          var bgPart = (BgPartsLayoutInstance*)inst;
+          var collider = bgPart->Collider;
+          if (collider == null) continue;
+          if (collider->GetColliderType() != ColliderType.Mesh) continue;
+
+          // object-level flag fast path; deep pass adds per-primitive walks
+          var isWall = ((bgPart->CollisionMaterialIdLow >> 20) & 0xF) == 1;
+          if (!isWall && allowDeep)
+          {
+            var meshCol = (ColliderMesh*)collider;
+            if (!meshCol->MeshIsSimple && meshCol->Mesh != null)
+            {
+              var pcb = (MeshPCB*)meshCol->Mesh;
+              if (pcb->RootNode != null) isWall = MeshHasMaterialPrim(pcb->RootNode, 20, 1, 0);
+            }
+          }
+          if (!isWall) continue;
+
+          AABB bb = default;
+          collider->GetWorldBB(&bb);
+          _territoryWallCache.Add(((nint)bgPart, bb));
+          walls++;
+        }
+      }
+      TerritoryWallCacheDiagnostic = $"{scanned} bgparts scanned, {walls} wall surfaces cached{(allowDeep ? " (deep)" : "")} at {DateTime.Now:HH:mm:ss}";
+    }
+
     /// <summary>
     /// Wall snap: wall-mounted items (HousingItemCategory 15) snap onto wall
     /// collision surfaces — including "false walls" (Stage Panels, partitions,
@@ -1240,6 +1333,27 @@ namespace HousingUnlocked
             }
           }
         }
+      }
+
+      // Static territory walls (the house's own walls): cached once per zone and
+      // measured with the same one-sided triangle test as furniture. This is what
+      // makes wall items warn near REAL walls, not just furniture false walls.
+      EnsureTerritoryWallCache(allowDeep: false);
+      if (_territoryWallCache.Count == 0)
+        EnsureTerritoryWallCache(allowDeep: true);
+
+      foreach (var (inst, bb) in _territoryWallCache)
+      {
+        var near = false;
+        foreach (var p in probes)
+        {
+          if (DistancePointToAABB(p, bb) <= limit) { near = true; break; }
+        }
+        if (!near) continue;
+
+        var m = BuildMatrix(*((BgPartsLayoutInstance*)inst)->GetTransformImpl());
+        var dummy = false;
+        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, limit, "house wall", ref best, ref bestName, ref wallTris, ref dummy);
       }
 
       WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), threshold {threshold:0.###} +safety {config.SnapThreshold:0.###} = {limit:0.###}, probes {probes.Count}";
@@ -1633,11 +1747,25 @@ namespace HousingUnlocked
         }
 
         if (!CanEditItem())
+        {
+          _lastActiveY = float.NaN;
           return;
+        }
 
         // Don't really need to load position if we're reading it in the UI thread anyway, but leaving it for now for redudency...
         Position = ReadPosition();
         Rotation = ReadRotation();
+
+        // Track vertical movement direction (see VerticalMoveDirection): the
+        // engine's snap follows the direction of travel, so warnings should too.
+        if (!float.IsNaN(_lastActiveY))
+        {
+          var dy = Position.Y - _lastActiveY;
+          if (dy < -0.0005f) VerticalMoveDirection = -1;
+          else if (dy > 0.0005f) VerticalMoveDirection = 1;
+          else VerticalMoveDirection = 0;
+        }
+        _lastActiveY = Position.Y;
 
         // Update the model of active item, the game doesn't do this for wall mounted and outside in rotate mode
         var item = HousingStructure->ActiveItem;

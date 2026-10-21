@@ -57,7 +57,7 @@ namespace HousingUnlocked
 
       CommandManager.AddHandler(commandName, new CommandInfo(OnCommand)
       {
-        HelpMessage = "Opens the controls for Housing Unlocked.\n/hu autoopen → toggles auto-open when entering housing mode.\n/hu threshold <value> → safety margin added to per-item snap distance (default 0.07).\n/hu learn → records the active item's current floor distance as its snap-distance override.\n/hu unlearn → removes the snap-distance override for the active item.\n/hu itemsnap → toggles the item-to-item snap warning (SphereCastRange data).\n/hu itemsnapmode <either|sum|placed> → which side's snap range drives item-to-item distance.\n/hu tablesnap → toggles the table snap warning (TableTop surfaces).\n/hu wallsnap → toggles the wall snap warning (false-wall surfaces)."
+        HelpMessage = "Opens the controls for Housing Unlocked.\n/hu autoopen → toggles auto-open when entering housing mode.\n/hu threshold <value> → safety margin added to per-item snap distance (default 0.07).\n/hu learn → records the active item's current floor distance as its snap-distance override.\n/hu unlearn → removes the snap-distance override for the active item.\n/hu itemsnap → toggles the item-to-item snap warning (SphereCastRange data).\n/hu itemsnapmode <either|sum|placed> → which side's snap range drives item-to-item distance.\n/hu tablesnap → toggles the table snap warning (TableTop surfaces).\n/hu wallsnap → toggles the wall snap warning (false-wall surfaces).\n/hu wallsrefresh → rebuilds the house-wall surface cache."
       });
 
       // Set the ImGui context 
@@ -205,6 +205,12 @@ namespace HousingUnlocked
             _configuration.ShowWallSnapWarning = !_configuration.ShowWallSnapWarning;
             _configuration.Save();
             Chat.Print($"[HU] Wall snap warning is now {(_configuration.ShowWallSnapWarning ? "ON" : "OFF")}.");
+          }
+
+          if (opt.Equals("wallsrefresh"))
+          {
+            _memory.InvalidateTerritoryWallCache();
+            Chat.Print("[HU] Territory wall cache invalidated — it will rebuild on the next wall item selection.");
           }
 
           if (opt.Equals("learn"))
