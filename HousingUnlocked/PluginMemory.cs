@@ -1353,7 +1353,7 @@ namespace HousingUnlocked
 
         var m = BuildMatrix(*((BgPartsLayoutInstance*)inst)->GetTransformImpl());
         var dummy = false;
-        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, limit, "house wall", ref best, ref bestName, ref wallTris, ref dummy);
+        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, limit, "terrain surface", ref best, ref bestName, ref wallTris, ref dummy);
       }
 
       WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), threshold {threshold:0.###} +safety {config.SnapThreshold:0.###} = {limit:0.###}, probes {probes.Count}";
