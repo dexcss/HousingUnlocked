@@ -89,12 +89,21 @@ namespace HousingUnlocked.Interface.Windows
           var tables = Memory.GetNearbyTableSurfaces();
           ImGui.Text($"Nearby TableTop receivers: {tables.Count}");
           foreach (var t in tables)
-            ImGui.Text($"  {t.Name} — surface Y {t.TopY:0.###} ({t.Distance:0.###} away)");
+            ImGui.Text($"  {t.Name} — surface Y {t.BB.Max.Y:0.###} ({t.Distance:0.###} away)");
 
           // Table snap detection for the active item.
           Memory.UpdateTableSnapDetection();
           ImGui.Text($"Table snap: {(Memory.LastTableSnapHit ? $"HIT {Memory.LastTableSnapTargetName} surfaceY={Memory.LastTableSnapSurfaceY:0.###} \u0394Y={Memory.LastTableSnapDeltaY:0.###}" : "no surface in snap margin")}");
           ImGui.Text($"  {Memory.TableSnapDiagnostic}");
+
+          // Wall snap detection (wall items vs false walls).
+          Memory.UpdateWallSnapDetection();
+          ImGui.Text($"Wall snap: {(Memory.LastWallSnapHit ? $"HIT {Memory.LastWallSnapTargetName} dist={Memory.LastWallSnapDistance:0.###} threshold={Memory.LastWallSnapThreshold:0.###}" : "no wall surface in snap range")}");
+          ImGui.Text($"  {Memory.WallSnapDiagnostic}");
+          var walls = Memory.GetNearbyWallSurfaces();
+          ImGui.Text($"Nearby WallCollision receivers: {walls.Count}");
+          foreach (var w in walls)
+            ImGui.Text($"  {w.Name} — top Y {w.BB.Max.Y:0.###} ({w.Distance:0.###} away)");
         }
       }
     }

@@ -331,6 +331,14 @@ namespace HousingUnlocked
     public float LastTableSnapSurfaceY { get; private set; } = 0f;
     public string TableSnapDiagnostic { get; private set; } = "(not computed)";
 
+    // Last wall-snap detection results (wall item snapping onto a wall surface,
+    // including "false walls" like stage panels).
+    public bool LastWallSnapHit { get; private set; } = false;
+    public string LastWallSnapTargetName { get; private set; } = "";
+    public float LastWallSnapDistance { get; private set; } = float.PositiveInfinity;
+    public float LastWallSnapThreshold { get; private set; } = 0f;
+    public string WallSnapDiagnostic { get; private set; } = "(not computed)";
+
     // Last raycast result for the active item (for diagnostics).
     public float LastFloorRaycastDistance { get; private set; } = float.PositiveInfinity;
     public bool LastFloorRaycastHit { get; private set; } = false;
@@ -822,19 +830,20 @@ namespace HousingUnlocked
 
     /// <summary>
     /// Walks a MeshPCB node tree looking for any per-primitive material carrying
-    /// the TableTop flag (nibble d4 == 8 — bits 16..19 of the material value).
-    /// Mirrors Housingway's GetAllMaterialValue primitive OR walk.
+    /// the given nibble flag. Mirrors Housingway's GetAllMaterialValue primitive
+    /// OR walk. Nibbles per the Re:MakePlace dev's material table:
+    /// shift 16 (d4): 1=FloorTop, 8=TableTop, 9=RugTop; shift 20 (d3): 1=WallCollisionMesh.
     /// </summary>
-    private static unsafe bool MeshHasTableTopPrim(MeshPCB.FileNode* node, int depth)
+    private static unsafe bool MeshHasMaterialPrim(MeshPCB.FileNode* node, int shift, int value, int depth)
     {
       while (node != null && depth < 64)
       {
         var prims = node->PrimitivesPtr;
         for (int i = 0; i < node->NumPrims; i++)
         {
-          if (((prims[i].Material >> 16) & 0xF) == 8) return true;
+          if (((prims[i].Material >> shift) & 0xF) == (ulong)value) return true;
         }
-        if (node->Child1 != null && MeshHasTableTopPrim(node->Child1, depth + 1)) return true;
+        if (node->Child1 != null && MeshHasMaterialPrim(node->Child1, shift, value, depth + 1)) return true;
         node = node->Child2;
         depth++;
       }
@@ -899,12 +908,12 @@ namespace HousingUnlocked
       float bestSurfaceY = 0f;
       foreach (var t in candidates)
       {
-        var dy = System.Math.Abs(t.TopY - pos.Y);
+        var dy = System.Math.Abs(t.BB.Max.Y - pos.Y);
         if (dy <= margin && dy < best)
         {
           best = dy;
           bestName = t.Name;
-          bestSurfaceY = t.TopY;
+          bestSurfaceY = t.BB.Max.Y;
         }
       }
 
@@ -920,14 +929,13 @@ namespace HousingUnlocked
     }
 
     /// <summary>
-    /// Debug: lists placed items near the active item whose collision meshes carry
-    /// the TableTop material flag (nibble d4 == 8 per the Re:MakePlace dev's
-    /// material table). These are the surfaces tabletop items snap onto — the
-    /// third snap component (regular edge/2, SphereCastRange override, table snap).
+    /// Scans placed items near the active item for colliders whose material value
+    /// carries the given nibble flag — object-level first, then per-primitive for
+    /// mesh colliders. Returns each receiver's name, world AABB and pivot distance.
     /// </summary>
-    public unsafe List<(string Name, float TopY, float Distance)> GetNearbyTableSurfaces(float maxDistance = 4f)
+    public unsafe List<(string Name, AABB BB, float Distance)> GetNearbySurfaces(int matShift, int matValue, float maxDistance)
     {
-      var results = new List<(string, float, float)>();
+      var results = new List<(string, AABB, float)>();
 
       if (HousingStructure == null || HousingStructure->ActiveItem == null ||
           HousingModule == null || HousingModule->GetCurrentManager() == null ||
@@ -967,13 +975,14 @@ namespace HousingUnlocked
         }
         if (cached.ItemId == 0) continue;
 
-        // Walk the placed item's children for a TableTop-flagged mesh collider.
+        // Walk the placed item's children for a flagged collider.
         var group = go->SharedGroupLayoutInstance;
         if (group == null) continue;
         var instances = group->Instances.Instances;
         var size = (int)(instances.Last - instances.First);
 
-        float topY = float.NegativeInfinity;
+        AABB bestBB = default;
+        var found = false;
         for (int c = 0; c < size; c++)
         {
           var childPtr = instances.First[c];
@@ -987,32 +996,158 @@ namespace HousingUnlocked
           if (collider == null) continue;
           if (collider->GetColliderType() != ColliderType.Mesh) continue;
 
-          // TableTop material flag: nibble d4 == 8 in CollisionMaterialIdLow,
-          // OR per-primitive materials for mesh colliders (bits 16..19).
-          var d4 = (int)((bgPart->CollisionMaterialIdLow >> 16) & 0xF);
-          var tableTop = d4 == 8;
-          if (!tableTop)
+          var nibble = (int)((bgPart->CollisionMaterialIdLow >> matShift) & 0xF);
+          var flagged = nibble == matValue;
+          if (!flagged)
           {
             var meshCol = (ColliderMesh*)collider;
             if (!meshCol->MeshIsSimple && meshCol->Mesh != null)
             {
               var pcb = (MeshPCB*)meshCol->Mesh;
               if (pcb->RootNode != null)
-                tableTop = MeshHasTableTopPrim(pcb->RootNode, 0);
+                flagged = MeshHasMaterialPrim(pcb->RootNode, matShift, matValue, 0);
             }
           }
-          if (!tableTop) continue;
+          if (!flagged) continue;
 
           AABB worldBB = default;
           collider->GetWorldBB(&worldBB);
-          if (worldBB.Max.Y > topY) topY = worldBB.Max.Y;
+          if (!found || worldBB.Max.Y > bestBB.Max.Y) bestBB = worldBB;
+          found = true;
         }
 
-        if (!float.IsNegativeInfinity(topY))
-          results.Add((cached.Name, topY, dist));
+        if (found)
+          results.Add((cached.Name, bestBB, dist));
       }
 
       return results;
+    }
+
+    /// <summary>TableTop receivers (nibble d4 == 8) — surfaces tabletop items snap onto.</summary>
+    public unsafe List<(string Name, AABB BB, float Distance)> GetNearbyTableSurfaces(float maxDistance = 4f)
+      => GetNearbySurfaces(16, 8, maxDistance);
+
+    /// <summary>
+    /// WallCollisionMesh receivers (nibble d3 == 1) — wall surfaces wall-mounted
+    /// items snap onto, including "false walls" (stage panels, partitions).
+    /// </summary>
+    public unsafe List<(string Name, AABB BB, float Distance)> GetNearbyWallSurfaces(float maxDistance = 6f)
+      => GetNearbySurfaces(20, 1, maxDistance);
+
+    /// <summary>
+    /// Wall snap: wall-mounted items (HousingItemCategory 15) snap onto wall
+    /// collision surfaces — including "false walls" (Stage Panels, partitions,
+    /// wardrobes) whose meshes carry the WallCollisionMesh material flag
+    /// (nibble d3 == 1, bits 20..23). Fires when the item's pivot or any of its
+    /// TargetMarker points comes within the item's wall snap threshold
+    /// (max TargetMarker XZ distance x 0.5) of a nearby wall surface's world AABB.
+    /// </summary>
+    public unsafe void UpdateWallSnapDetection()
+    {
+      LastWallSnapHit = false;
+      LastWallSnapTargetName = "";
+      LastWallSnapDistance = float.PositiveInfinity;
+      LastWallSnapThreshold = 0f;
+
+      if (HousingStructure == null || HousingStructure->ActiveItem == null ||
+          HousingModule == null || HousingModule->GetCurrentManager() == null ||
+          HousingModule->GetCurrentManager()->Objects == null)
+      {
+        WallSnapDiagnostic = "no housing/active item";
+        return;
+      }
+
+      var active = HousingStructure->ActiveItem;
+
+      if (_cachedActiveItemCategory != 15)
+      {
+        WallSnapDiagnostic = $"active item not wall-mounted (category {_cachedActiveItemCategory})";
+        return;
+      }
+
+      // Wall snap threshold for this item (TargetMarker-derived; the priority
+      // chain in GetActiveItemFFXIVId already stored it when applicable).
+      float threshold = ActiveItemSnapThreshold;
+      if (threshold <= 0f)
+      {
+        var wm = GetWallTargetMarkerDistance(active, active->Transform.Translation);
+        if (wm.HasValue) threshold = wm.Value;
+      }
+      if (threshold <= 0f)
+      {
+        WallSnapDiagnostic = "no wall threshold (no TargetMarker children)";
+        return;
+      }
+      LastWallSnapThreshold = threshold;
+
+      var config = Plugin.GetConfiguration();
+      var limit = threshold + config.SnapThreshold;
+
+      // Probe points: the item pivot plus every TargetMarker offset, rotated
+      // into world space by the item's yaw.
+      var pos = active->Transform.Translation;
+      var rot = active->Transform.Rotation;
+      var yaw = MathF.Atan2(2.0f * (rot.W * rot.Y + rot.X * rot.Z), 1.0f - 2.0f * (rot.Y * rot.Y + rot.X * rot.X));
+      var cosY = MathF.Cos(yaw);
+      var sinY = MathF.Sin(yaw);
+
+      var probes = new List<Vector3> { pos };
+      var instances = active->Instances.Instances;
+      var size = (int)(instances.Last - instances.First);
+      for (int i = 0; i < size; i++)
+      {
+        var childPtr = instances.First[i];
+        if (childPtr.Value == null) continue;
+        var ci = childPtr.Value->Instance;
+        if (ci == null) continue;
+        if (ci->Id.Type != InstanceType.TargetMarker) continue;
+        var t = *ci->GetTransformImpl();
+        var lx = t.Translation.X;
+        var lz = t.Translation.Z;
+        probes.Add(new Vector3(
+          pos.X + lx * cosY + lz * sinY,
+          pos.Y + t.Translation.Y,
+          pos.Z - lx * sinY + lz * cosY));
+      }
+
+      // Scan placed items for WallCollisionMesh surfaces and measure each probe
+      // against their world AABBs.
+      var walls = GetNearbyWallSurfaces();
+      float best = float.PositiveInfinity;
+      string bestName = "";
+      foreach (var w in walls)
+      {
+        foreach (var p in probes)
+        {
+          var d = DistancePointToAABB(p, w.BB);
+          if (d < best)
+          {
+            best = d;
+            bestName = w.Name;
+          }
+        }
+      }
+
+      WallSnapDiagnostic = $"{walls.Count} WallCollision receiver(s) nearby, threshold {threshold:0.###} +safety {config.SnapThreshold:0.###} = {limit:0.###}, probes {probes.Count}";
+
+      if (best <= limit)
+      {
+        LastWallSnapHit = true;
+        LastWallSnapDistance = best;
+        LastWallSnapTargetName = bestName;
+      }
+    }
+
+    /// <summary>Distance from a point to the closest point on an AABB (0 when inside).</summary>
+    private static float DistancePointToAABB(Vector3 p, AABB bb)
+    {
+      var cx = System.Math.Clamp(p.X, bb.Min.X, bb.Max.X);
+      var cy = System.Math.Clamp(p.Y, bb.Min.Y, bb.Max.Y);
+      var cz = System.Math.Clamp(p.Z, bb.Min.Z, bb.Max.Z);
+      var dx = p.X - cx;
+      var dy = p.Y - cy;
+      var dz = p.Z - cz;
+      return MathF.Sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     /// <summary>

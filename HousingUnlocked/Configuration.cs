@@ -48,6 +48,11 @@ namespace HousingUnlocked
     // the item's pivot — the engine will attach the item onto that surface.
     public bool ShowTableSnapWarning { get; set; } = true;
 
+    // Wall snap warning: fires for wall-mounted items (HousingItemCategory 15)
+    // when a nearby WallCollisionMesh surface (house-adjacent false walls like
+    // stage panels and partitions) is within the item's wall snap threshold.
+    public bool ShowWallSnapWarning { get; set; } = true;
+
     public void Save()
     {
       Plugin.PluginInterface.SavePluginConfig(this);

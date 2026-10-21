@@ -136,6 +136,27 @@ namespace HousingUnlocked.Interface.Components
         }
       }
 
+      // Wall snap warning: wall-mounted items attach onto wall collision surfaces —
+      // including "false walls" (stage panels, partitions) via WallCollisionMesh.
+      if (Configuration.ShowWallSnapWarning && activeItemId != 0)
+      {
+        Memory.UpdateWallSnapDetection();
+        if (Memory.LastWallSnapHit)
+        {
+          var wallName = string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName;
+          ImGui.TextColored(RED, $"\u26A0 WILL SNAP TO WALL: {wallName}");
+          if (ImGui.IsItemHovered())
+          {
+            ImGui.BeginTooltip();
+            ImGui.Text($"Surface: {wallName}");
+            ImGui.Text($"Distance: {Memory.LastWallSnapDistance:0.###}");
+            ImGui.Text($"Wall snap threshold: {Memory.LastWallSnapThreshold:0.###} (+{Configuration.SnapThreshold:0.###} safety)");
+            ImGui.Text("Wall items (skylights, wallboards, etc.) attach to WallCollisionMesh surfaces — including stage panels and other false walls.");
+            ImGui.EndTooltip();
+          }
+        }
+      }
+
       // Copy / Paste buttons for position & rotation (icon + text).
       if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Copy, "Copy"))
       {
