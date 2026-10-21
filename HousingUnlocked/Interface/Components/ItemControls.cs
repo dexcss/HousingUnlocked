@@ -200,6 +200,25 @@ namespace HousingUnlocked.Interface.Components
       DrawInputCoord("y coord##hu-y", ref Memory.Position.Y, ref lockY, GREEN, inSnapZone);
       DrawInputCoord("z coord##hu-z", ref Memory.Position.Z, ref lockZ, BLUE);
       DrawInputRotate("ry degree##hu-ry", ref Memory.Rotation.Y);
+
+      // In-game ground-truth capture (see SnapLogger): session runs while the
+      // window is open; /hu mark labels snap moments inside the trace.
+      if (SnapLogger.Enabled && Memory.HousingStructure != null)
+      {
+        var hs = Memory.HousingStructure;
+        SnapLogger.Frame(
+          activeItemId, (int)Memory.ActiveItemCategory,
+          Memory.Position.X, Memory.Position.Y, Memory.Position.Z, Memory.Rotation.Y,
+          Memory.VerticalMoveDirection,
+          (uint)hs->Mode, (uint)hs->State, (uint)hs->State2, hs->Rotating,
+          Configuration.PlaceAnywhere,
+          isFloorSnapItem, Memory.LastFloorRaycastHit, floorD, Memory.LastCeilingRaycastHit, ceilD,
+          perItemThreshold, effectiveThreshold, inSnapZone, snapsUp,
+          Memory.LastItemSnapHit, Memory.LastItemSnapTargetName, Memory.LastItemSnapDistance, Memory.LastItemSnapEffectiveRange,
+          Memory.LastWallSnapHit, Memory.LastWallSnapTargetName, Memory.LastWallSnapDistance, Memory.LastWallSnapThreshold, Memory.WallSnapDiagnostic,
+          Memory.LastTableSnapHit, Memory.LastTableSnapTargetName, Memory.LastTableSnapDeltaY, Memory.TableSnapDiagnostic,
+          Memory.SnapThresholdDiagnostic, Memory.ItemSnapDiagnostic);
+      }
     }
 
     private void HandleScrollInput(ref float f)

@@ -1168,6 +1168,7 @@ namespace HousingUnlocked
         }
       }
       TerritoryWallCacheDiagnostic = $"{scanned} bgparts scanned, {walls} wall surfaces cached{(allowDeep ? " (deep)" : "")} at {DateTime.Now:HH:mm:ss}";
+      SnapLogger.Event("wallcache", TerritoryWallCacheDiagnostic);
     }
 
     /// <summary>

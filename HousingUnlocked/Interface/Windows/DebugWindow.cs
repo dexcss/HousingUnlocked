@@ -96,9 +96,10 @@ namespace HousingUnlocked.Interface.Windows
           ImGui.Text($"Table snap: {(Memory.LastTableSnapHit ? $"HIT {Memory.LastTableSnapTargetName} surfaceY={Memory.LastTableSnapSurfaceY:0.###} \u0394Y={Memory.LastTableSnapDeltaY:0.###}" : "no surface in snap margin")}");
           ImGui.Text($"  {Memory.TableSnapDiagnostic}");
 
-          // Territory wall cache (house walls) + movement direction.
+          // Territory wall cache (house walls) + movement direction + logger.
           ImGui.Text($"Territory wall cache: {Memory.TerritoryWallCacheDiagnostic}");
           ImGui.Text($"Vertical move dir: {Memory.VerticalMoveDirection} (-1 down, +1 up, 0 still)");
+          ImGui.Text($"Logger: {(SnapLogger.Enabled ? $"ON — {SnapLogger.CurrentFile}" : "off (starts when the main window opens)")}");
 
           // Wall snap detection (wall items vs false walls).
           Memory.UpdateWallSnapDetection();

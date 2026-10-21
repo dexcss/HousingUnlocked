@@ -24,6 +24,15 @@ namespace HousingUnlocked.Interface
 
     public void Draw()
     {
+      // Snap logger auto start/stop with the main window (manual /hu log overrides).
+      if (Main.IsOpen)
+      {
+        if (!SnapLogger.Enabled && !SnapLogger.ManualOverride)
+          SnapLogger.Start("main window opened");
+      }
+      else if (SnapLogger.Enabled && !SnapLogger.ManualOverride)
+        SnapLogger.Stop("main window closed");
+
       Gizmo.Draw();
       Windows.Draw();
     }

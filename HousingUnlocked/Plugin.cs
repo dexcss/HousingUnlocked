@@ -57,7 +57,7 @@ namespace HousingUnlocked
 
       CommandManager.AddHandler(commandName, new CommandInfo(OnCommand)
       {
-        HelpMessage = "Opens the controls for Housing Unlocked.\n/hu autoopen → toggles auto-open when entering housing mode.\n/hu threshold <value> → safety margin added to per-item snap distance (default 0.07).\n/hu learn → records the active item's current floor distance as its snap-distance override.\n/hu unlearn → removes the snap-distance override for the active item.\n/hu itemsnap → toggles the item-to-item snap warning (SphereCastRange data).\n/hu itemsnapmode <either|sum|placed> → which side's snap range drives item-to-item distance.\n/hu tablesnap → toggles the table snap warning (TableTop surfaces).\n/hu wallsnap → toggles the wall snap warning (false-wall surfaces).\n/hu wallsrefresh → rebuilds the house-wall surface cache."
+        HelpMessage = "Opens the controls for Housing Unlocked.\n/hu autoopen → toggles auto-open when entering housing mode.\n/hu threshold <value> → safety margin added to per-item snap distance (default 0.07).\n/hu learn → records the active item's current floor distance as its snap-distance override.\n/hu unlearn → removes the snap-distance override for the active item.\n/hu itemsnap → toggles the item-to-item snap warning (SphereCastRange data).\n/hu itemsnapmode <either|sum|placed> → which side's snap range drives item-to-item distance.\n/hu tablesnap → toggles the table snap warning (TableTop surfaces).\n/hu wallsnap → toggles the wall snap warning (false-wall surfaces).\n/hu wallsrefresh → rebuilds the house-wall surface cache.\n/hu log → toggles the snap session logger.\n/hu mark <note> → labels this moment in the log (use it the instant something snaps).\n/hu logpath → shows where session logs are saved."
       });
 
       // Set the ImGui context 
@@ -211,6 +211,33 @@ namespace HousingUnlocked
           {
             _memory.InvalidateTerritoryWallCache();
             Chat.Print("[HU] Territory wall cache invalidated — it will rebuild on the next wall item selection.");
+          }
+
+          if (opt.Equals("log"))
+          {
+            SnapLogger.ManualOverride = true;
+            if (SnapLogger.Enabled) SnapLogger.Stop("/hu log toggle");
+            else SnapLogger.Start("/hu log toggle");
+          }
+
+          if (opt.Equals("logpath"))
+          {
+            Chat.Print($"[HU] Log directory: {SnapLogger.LogDirectory}");
+            if (SnapLogger.Enabled) Chat.Print($"[HU] Current session file: {SnapLogger.CurrentFile}");
+          }
+
+          if (argArray.Length >= 2 && opt.Equals("mark"))
+          {
+            var note = string.Join(' ', argArray[1..]);
+            var p = _memory.Position;
+            SnapLogger.Mark(note, p.X, p.Y, p.Z);
+            Chat.Print($"[HU] Marked: {note}");
+          }
+          else if (opt.Equals("mark"))
+          {
+            var p = _memory.Position;
+            SnapLogger.Mark("snap", p.X, p.Y, p.Z);
+            Chat.Print("[HU] Marked: snap");
           }
 
           if (opt.Equals("learn"))
