@@ -931,9 +931,12 @@ namespace HousingUnlocked
     /// <summary>
     /// Scans placed items near the active item for colliders whose material value
     /// carries the given nibble flag — object-level first, then per-primitive for
-    /// mesh colliders. Returns each receiver's name, world AABB and pivot distance.
+    /// mesh colliders. When nothing is flagged at runtime but <paramref name="embeddedFallback"/>
+    /// says the item is a known receiver (from the offline collision census), the
+    /// union of the item's collider AABBs is used instead. Returns each receiver's
+    /// name, world AABB and pivot distance.
     /// </summary>
-    public unsafe List<(string Name, AABB BB, float Distance)> GetNearbySurfaces(int matShift, int matValue, float maxDistance)
+    public unsafe List<(string Name, AABB BB, float Distance)> GetNearbySurfaces(int matShift, int matValue, float maxDistance, Func<uint, bool>? embeddedFallback = null)
     {
       var results = new List<(string, AABB, float)>();
 
@@ -1016,6 +1019,45 @@ namespace HousingUnlocked
           found = true;
         }
 
+        // Embedded-census fallback: item is a known receiver but no flagged
+        // collider was read at runtime — use the union of its collider AABBs.
+        if (!found && embeddedFallback != null && embeddedFallback(cached.ItemId))
+        {
+          AABB union = default;
+          var any = false;
+          for (int c = 0; c < size; c++)
+          {
+            var childPtr = instances.First[c];
+            if (childPtr.Value == null) continue;
+            var ci = childPtr.Value->Instance;
+            if (ci == null) continue;
+            if (ci->Id.Type != InstanceType.BgPart) continue;
+            var bgPart = (BgPartsLayoutInstance*)ci;
+            if (bgPart->Collider == null) continue;
+            AABB bb = default;
+            bgPart->Collider->GetWorldBB(&bb);
+            if (!any)
+            {
+              union = bb;
+              any = true;
+            }
+            else
+            {
+              if (bb.Min.X < union.Min.X) union.Min.X = bb.Min.X;
+              if (bb.Min.Y < union.Min.Y) union.Min.Y = bb.Min.Y;
+              if (bb.Min.Z < union.Min.Z) union.Min.Z = bb.Min.Z;
+              if (bb.Max.X > union.Max.X) union.Max.X = bb.Max.X;
+              if (bb.Max.Y > union.Max.Y) union.Max.Y = bb.Max.Y;
+              if (bb.Max.Z > union.Max.Z) union.Max.Z = bb.Max.Z;
+            }
+          }
+          if (any)
+          {
+            bestBB = union;
+            found = true;
+          }
+        }
+
         if (found)
           results.Add((cached.Name, bestBB, dist));
       }
@@ -1025,14 +1067,14 @@ namespace HousingUnlocked
 
     /// <summary>TableTop receivers (nibble d4 == 8) — surfaces tabletop items snap onto.</summary>
     public unsafe List<(string Name, AABB BB, float Distance)> GetNearbyTableSurfaces(float maxDistance = 4f)
-      => GetNearbySurfaces(16, 8, maxDistance);
+      => GetNearbySurfaces(16, 8, maxDistance, id => SnapRangeData.IsTableReceiver(id));
 
     /// <summary>
     /// WallCollisionMesh receivers (nibble d3 == 1) — wall surfaces wall-mounted
     /// items snap onto, including "false walls" (stage panels, partitions).
     /// </summary>
     public unsafe List<(string Name, AABB BB, float Distance)> GetNearbyWallSurfaces(float maxDistance = 6f)
-      => GetNearbySurfaces(20, 1, maxDistance);
+      => GetNearbySurfaces(20, 1, maxDistance, id => SnapRangeData.IsWallReceiver(id));
 
     /// <summary>
     /// Wall snap: wall-mounted items (HousingItemCategory 15) snap onto wall
@@ -1058,6 +1100,7 @@ namespace HousingUnlocked
       }
 
       var active = HousingStructure->ActiveItem;
+      var activeItemId = GetActiveItemFFXIVId();
 
       if (_cachedActiveItemCategory != 15)
       {
@@ -1065,13 +1108,17 @@ namespace HousingUnlocked
         return;
       }
 
-      // Wall snap threshold for this item (TargetMarker-derived; the priority
-      // chain in GetActiveItemFFXIVId already stored it when applicable).
+      // Wall snap threshold for this item. Priority: TargetMarker children read
+      // at runtime, then the embedded sgb threshold table, then whatever the
+      // priority chain in GetActiveItemFFXIVId stored.
       float threshold = ActiveItemSnapThreshold;
       if (threshold <= 0f)
       {
         var wm = GetWallTargetMarkerDistance(active, active->Transform.Translation);
-        if (wm.HasValue) threshold = wm.Value;
+        if (wm.HasValue && wm.Value > 0f)
+          threshold = wm.Value;
+        else if (activeItemId != 0 && SnapRangeData.TryGetWallThreshold(activeItemId, out var wtd))
+          threshold = wtd;
       }
       if (threshold <= 0f)
       {
@@ -1239,14 +1286,19 @@ namespace HousingUnlocked
         {
           // Wall-mounted item: the engine's wall snap distance comes from the
           // item's TargetMarker children (max XZ distance from pivot x 0.5) —
-          // Housingway-validated. Falls back to the footprint formula if the
-          // item has no TargetMarker.
+          // Housingway-validated. Fallbacks: embedded sgb table, then the
+          // footprint formula.
           ActiveItemSphereCastSource = "(none)";
           var wallDist = GetWallTargetMarkerDistance(active, active->Transform.Translation);
-          if (wallDist.HasValue)
+          if (wallDist.HasValue && wallDist.Value > 0f)
           {
             ActiveItemSnapThreshold = wallDist.Value;
             SnapThresholdDiagnostic = $"wall TargetMarker -> {wallDist.Value:0.####}";
+          }
+          else if (_cachedActiveItemId != 0 && SnapRangeData.TryGetWallThreshold(_cachedActiveItemId, out var wt))
+          {
+            ActiveItemSnapThreshold = wt;
+            SnapThresholdDiagnostic = $"wall threshold (sgb table) -> {wt:0.####}";
           }
           else
           {
