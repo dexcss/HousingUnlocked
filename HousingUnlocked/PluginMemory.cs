@@ -1274,13 +1274,10 @@ namespace HousingUnlocked
         var ci = childPtr.Value->Instance;
         if (ci == null) continue;
         if (ci->Id.Type != InstanceType.TargetMarker) continue;
+        // Child instance transforms are WORLD-space (layout engine flattens the
+        // group hierarchy) — use the marker translation directly as a probe.
         var t = *ci->GetTransformImpl();
-        var lx = t.Translation.X;
-        var lz = t.Translation.Z;
-        probes.Add(new Vector3(
-          pos.X + lx * cosY + lz * sinY,
-          pos.Y + t.Translation.Y,
-          pos.Z - lx * sinY + lz * cosY));
+        probes.Add(t.Translation);
       }
 
       // One-sided wall surface scan: walk placed receivers' wall-flagged collision
@@ -1322,7 +1319,6 @@ namespace HousingUnlocked
 
         var group = go->SharedGroupLayoutInstance;
         if (group == null) continue;
-        var groupM = BuildMatrix(group->Transform);
 
         var itemInstances = group->Instances.Instances;
         var itemSize = (int)(itemInstances.Last - itemInstances.First);
@@ -1335,10 +1331,15 @@ namespace HousingUnlocked
           var ci = childPtr.Value->Instance;
           if (ci == null) continue;
           if (ci->Id.Type != InstanceType.BgPart) continue;
+          // Child instance transforms are WORLD-space (layout engine flattens the
+          // group hierarchy — same reason TargetMarker translations compare
+          // directly against world positions). Do NOT compose with the group
+          // transform: double-applying it displaces the triangles by the item's
+          // own position/rotation (the v1.7.0.0 stage-panel height bug).
           var childM = BuildMatrix(*ci->GetTransformImpl());
           WalkWallTriangles(
             (BgPartsLayoutInstance*)ci,
-            childM * groupM,
+            childM,
             probes, limit, cached.Name,
             ref best, ref bestName, ref wallTris, ref hadWallTris);
         }
