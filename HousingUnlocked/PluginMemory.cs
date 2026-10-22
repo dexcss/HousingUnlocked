@@ -1338,11 +1338,12 @@ namespace HousingUnlocked
       // triangles in world space and measure each probe against the FRONT side only.
       // 32 of the game's 38 wall receivers are strictly one-sided (verified offline
       // from their collision meshes) — the back of a stage panel accepts nothing.
-      float best = float.PositiveInfinity;
-      string bestName = "";
+      float bestFurn = float.PositiveInfinity;
+      string bestFurnName = "";
+      float bestTerr = float.PositiveInfinity;
+      string bestTerrName = "";
       int wallTris = 0;
       var usedAabbFallback = false;
-      var bestIsTerritory = false;
 
       for (var i = 0; i < 600; i++)
       {
@@ -1396,7 +1397,7 @@ namespace HousingUnlocked
             (BgPartsLayoutInstance*)ci,
             childM,
             probes, limit, cached.Name,
-            ref best, ref bestName, ref wallTris, ref hadWallTris);
+            ref bestFurn, ref bestFurnName, ref wallTris, ref hadWallTris);
         }
 
         // Embedded-census fallback: known wall receiver, but no wall triangles were
@@ -1410,10 +1411,10 @@ namespace HousingUnlocked
             foreach (var p in probes)
             {
               var d = DistancePointToAABB(p, union.Value);
-              if (d < best)
+              if (d < bestFurn)
               {
-                best = d;
-                bestName = cached.Name;
+                bestFurn = d;
+                bestFurnName = cached.Name;
               }
             }
           }
@@ -1421,9 +1422,11 @@ namespace HousingUnlocked
       }
 
       // Static territory walls (the house's own walls): cached once per zone and
-      // measured with the same one-sided triangle test as furniture. Territory
-      // walls grab wall items on DESELECT (measured 3.25).
-      var bestBeforeTerritory = best;
+      // measured with the same one-sided triangle test. House walls snap wall
+      // items on DESELECT with a capture distance of 1.0 yalms — MEASURED
+      // IN-GAME: the skylight snaps at pivot 0.99 from the wall plane (X=-19.01
+      // on the X=-20 wall) and does not snap at 1.00 (X=-19.0).
+      var territoryLimit = config.WallCaptureDistance;
       EnsureTerritoryWallCache(allowDeep: false);
       if (_territoryWallCache.Count == 0)
         EnsureTerritoryWallCache(allowDeep: true);
@@ -1433,24 +1436,26 @@ namespace HousingUnlocked
         var near = false;
         foreach (var p in probes)
         {
-          if (DistancePointToAABB(p, bb) <= limit) { near = true; break; }
+          if (DistancePointToAABB(p, bb) <= territoryLimit) { near = true; break; }
         }
         if (!near) continue;
 
         var m = BuildMatrix(*((BgPartsLayoutInstance*)inst)->GetTransformImpl());
         var dummy = false;
-        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, limit, "wall/terrain", ref best, ref bestName, ref wallTris, ref dummy);
+        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, territoryLimit, "house wall", ref bestTerr, ref bestTerrName, ref wallTris, ref dummy);
       }
-      if (best < bestBeforeTerritory) bestIsTerritory = true;
 
-      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture = {wallBaseSrc} {wallBase:0.####} +eps {config.WallCaptureMargin:0.##} = {limit:0.###}, pivot probe";
+      var furnHit = bestFurn <= limit;
+      var terrHit = bestTerr <= territoryLimit;
+      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), furniture capture {wallBaseSrc} {wallBase:0.####}+{config.WallCaptureMargin:0.##} = {limit:0.###}, house-wall capture {territoryLimit:0.###}, pivot probe";
 
-      if (best <= limit)
+      if (furnHit || terrHit)
       {
+        var useTerritory = terrHit && (!furnHit || bestTerr <= bestFurn);
         LastWallSnapHit = true;
-        LastWallSnapDistance = best;
-        LastWallSnapTargetName = bestName;
-        LastWallSnapTargetIsTerritory = bestIsTerritory;
+        LastWallSnapDistance = useTerritory ? bestTerr : bestFurn;
+        LastWallSnapTargetName = useTerritory ? bestTerrName : bestFurnName;
+        LastWallSnapTargetIsTerritory = useTerritory;
       }
     }
 

@@ -53,10 +53,14 @@ namespace HousingUnlocked
     // stage panels and partitions) is within the item's wall snap threshold.
     public bool ShowWallSnapWarning { get; set; } = true;
 
-    // Epsilon added on top of the EXACT wall projection capture base (authored
-    // SphereCastRange or the derived collision half-extent). The base itself is
-    // the engine's real value; this only widens the warning by a hair.
+    // Epsilon added on top of the DERIVED wall capture base for furniture false
+    // walls (which attach on interface exit / re-entry).
     public float WallCaptureMargin { get; set; } = 0.25f;
+
+    // House-wall (territory) snap capture distance — MEASURED IN-GAME: the
+    // imitation skylight snaps at pivot distance 0.99 from the wall plane and
+    // does not snap at 1.00. House walls snap wall items on deselect.
+    public float WallCaptureDistance { get; set; } = 1.0f;
 
     public void Save()
     {
