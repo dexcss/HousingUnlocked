@@ -645,11 +645,10 @@ namespace HousingUnlocked
       // For each known floor above the item's top, compute the distance.
       // Take the minimum across all candidate floors.
       //
-      // This also handles the "tall item spans floor" case: if a known floor Y
-      // is between item.bottom and item.top, the item's body intersects with
-      // that floor surface, and the engine treats the item as a candidate to
-      // snap to that floor. We report distance = 0 in that case (snap is
-      // imminent/inevitable).
+      // This also used to treat a "tall item spans floor" case as distance 0, but
+      // that misfired on ordinary floor items (Log Pillar moving over the ground
+      // floor reported an upward snap from 1.4 yalms up). Only real floors above
+      // the item's top count now.
       float ceilingGap = float.PositiveInfinity;
       bool foundUpwardSnap = false;
 
@@ -669,16 +668,6 @@ namespace HousingUnlocked
         for (int f = 0; f < 3; f++)
         {
           var floorY = knownFloors[f];
-
-          // Spans-floor case: floor Y is between item bottom and item top.
-          // The item physically overlaps this floor surface — engine may snap
-          // it onto this floor. Report distance = 0 (in snap zone unconditionally).
-          if (floorY >= lowestY && floorY <= highestY)
-          {
-            ceilingGap = 0f;
-            foundUpwardSnap = true;
-            break;
-          }
 
           // Floor-above case: floor Y is above the item's top. Distance from
           // item.top up to this floor.
