@@ -1388,7 +1388,7 @@ namespace HousingUnlocked
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"wall mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), wall capture {capture:0.###} flat; furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}), territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
+      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} (item back); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}), territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
 
       if (furnHit || terrHit)
       {
@@ -1478,21 +1478,35 @@ namespace HousingUnlocked
 
         foreach (var probe in probes)
         {
-          // Side rule (measured in-game):
-          //  - house/territory walls: FRONT (normal) side accepts wall items
-          //  - furniture false walls: the BACK (anti-normal) side accepts them —
-          //    a stage panel facing the room holds wall items on its back; if it
-          //    is turned around (snap face toward the wall) nothing attaches.
+          // Side eligibility (which faces may accept items):
+          //  - house/territory walls: either side (the face is one-sided; the ray decides)
+          //  - furniture false walls: the back (anti-normal) side only.
           var side = Vector3.Dot(n, probe - a);
           if (!acceptBothSides && (acceptBackSide ? side > 0f : side < 0f)) continue;
-          // Facing: the item only attaches when its front points the same way as the
-          // attachable surface. Flipping it 180° (front toward the wall) disables the
-          // snap for house walls and furniture false walls alike (measured in-game).
-          if (Vector3.Dot(itemFront, n) < 0f) continue;
-          var d = DistancePointTriangle(probe, a, b, c);
-          if (d < best)
+
+          // Back-ray: the item attaches when a ray from its pivot along its BACK
+          // (local -Z) reaches the surface within the flat 1.0 capture. This is the
+          // measured angular behavior: at 0.404 from a wall it snaps at 65°
+          // (0.404/cos65 = 0.956) but not at 70° (0.404/cos70 = 1.18). It also
+          // makes the 180° flip fail naturally — the ray points away from the wall.
+          var backDir = -itemFront;
+          var e1 = b - a;
+          var e2 = c - a;
+          var pvec = Vector3.Cross(backDir, e2);
+          var det = Vector3.Dot(e1, pvec);
+          if (MathF.Abs(det) < 1e-7f) continue;
+          var invDet = 1f / det;
+          var tvec = probe - a;
+          var u = Vector3.Dot(tvec, pvec) * invDet;
+          if (u < 0f || u > 1f) continue;
+          var qvec = Vector3.Cross(tvec, e1);
+          var v = Vector3.Dot(backDir, qvec) * invDet;
+          if (v < 0f || u + v > 1f) continue;
+          var t = Vector3.Dot(e2, qvec) * invDet;
+          if (t < 0f || t > limit) continue;
+          if (t < best)
           {
-            best = d;
+            best = t;
             bestName = name;
           }
         }
