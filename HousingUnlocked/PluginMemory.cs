@@ -391,6 +391,21 @@ namespace HousingUnlocked
     public int VerticalMoveDirection { get; private set; } = 0;
     private float _lastActiveY = float.NaN;
 
+    // ==== Deselect / post-snap capture ====
+    // The engine applies snaps when the item is DESELECTED, not while dragging.
+    // On the ActiveItem -> null transition we log the last held position, then
+    // watch the placed item's layout instance in the housing manager and log
+    // where the engine moves it — the before/after delta is the actual snap vector.
+    private bool _hadActiveItem;
+    private nint _lastActiveGroup;
+    private uint _lastActiveItemIdPost;
+    private Vector3 _lastActiveGroupPos;
+    private nint _pendingPostSnapGroup;
+    private uint _pendingPostSnapItemId;
+    private Vector3 _postSnapLast;
+    private int _postSnapFrames;
+    private int _postSnapStable;
+
     // HousingItemCategory of the cached active item (15 = wall-mounted, per the
     // HousingFurniture/HousingYardObject sheets).
     private uint _cachedActiveItemCategory = 0;
@@ -1619,6 +1634,7 @@ namespace HousingUnlocked
           _cachedActiveItemId = yard.Item.Value.RowId;
           _cachedActiveItemCategory = (uint)yard.HousingItemCategory;
         }
+        _lastActiveItemIdPost = _cachedActiveItemId; // kept through deselect for post-snap logging
         break;
       }
 
@@ -1736,6 +1752,76 @@ namespace HousingUnlocked
       {
         var lastIsHousingOpen = _isHousingOpen;
         _isHousingOpen = IsHousingOpen();
+
+        // Deselect detection + post-snap tracking. The engine applies snaps when
+        // the item is deselected, so this transition (and where the item lands)
+        // is the ground truth for every snap warning.
+        var hsTrack = HousingStructure;
+        if (hsTrack != null)
+        {
+          var ai = hsTrack->ActiveItem;
+          if (ai != null)
+          {
+            _hadActiveItem = true;
+            _lastActiveGroup = (nint)ai;
+            _lastActiveGroupPos = ai->Transform.Translation;
+            _postSnapFrames = 0;
+          }
+          else if (_hadActiveItem)
+          {
+            _hadActiveItem = false;
+            _pendingPostSnapGroup = _lastActiveGroup;
+            _pendingPostSnapItemId = _lastActiveItemIdPost;
+            _postSnapLast = _lastActiveGroupPos;
+            _postSnapFrames = 45;
+            _postSnapStable = 0;
+            SnapLogger.Event("DESELECT",
+              $"item={_pendingPostSnapItemId} group=0x{_lastActiveGroup:X} " +
+              $"heldPos=[{_lastActiveGroupPos.X:0.####},{_lastActiveGroupPos.Y:0.####},{_lastActiveGroupPos.Z:0.####}]");
+          }
+
+          if (_pendingPostSnapGroup != 0 && _postSnapFrames > 0)
+          {
+            _postSnapFrames--;
+            var mgr = HousingModule?.GetCurrentManager();
+            if (mgr != null && mgr->Objects != null)
+            {
+              for (var i = 0; i < 600; i++)
+              {
+                var addr = mgr->Objects[i];
+                if (addr == 0) continue;
+                var go = (GameObject*)addr;
+                if ((nint)go->SharedGroupLayoutInstance != _pendingPostSnapGroup) continue;
+
+                var p = go->Position;
+                var moved = Vector3.Distance(p, _postSnapLast);
+                if (moved > 0.0005f)
+                {
+                  _postSnapLast = p;
+                  _postSnapStable = 0;
+                  SnapLogger.Event("postsnap_move",
+                    $"pos=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}] moved={moved:0.####} framesLeft={_postSnapFrames}");
+                }
+                else if (++_postSnapStable >= 3)
+                {
+                  var dx = p.X - _lastActiveGroupPos.X;
+                  var dy = p.Y - _lastActiveGroupPos.Y;
+                  var dz = p.Z - _lastActiveGroupPos.Z;
+                  SnapLogger.Event("POSTSNAP_FINAL",
+                    $"item={_pendingPostSnapItemId} before=[{_lastActiveGroupPos.X:0.####},{_lastActiveGroupPos.Y:0.####},{_lastActiveGroupPos.Z:0.####}] " +
+                    $"after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}] delta=[{dx:0.####},{dy:0.####},{dz:0.####}] mag={MathF.Sqrt(dx * dx + dy * dy + dz * dz):0.####}");
+                  _pendingPostSnapGroup = 0;
+                }
+                break;
+              }
+            }
+            if (_postSnapFrames == 0 && _pendingPostSnapGroup != 0)
+            {
+              SnapLogger.Event("postsnap_lost", $"item={_pendingPostSnapItemId} group=0x{_pendingPostSnapGroup:X}");
+              _pendingPostSnapGroup = 0;
+            }
+          }
+        }
 
         // Just perform once when housing is opened
         if (lastIsHousingOpen != _isHousingOpen && _isHousingOpen)

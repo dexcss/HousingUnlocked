@@ -88,7 +88,7 @@ namespace HousingUnlocked.Interface.Components
         if (ImGui.IsItemHovered())
         {
           ImGui.BeginTooltip();
-          ImGui.Text("This item is tagged as floor-snapping.");
+          ImGui.Text("This item is tagged as floor-snapping. Snap applies when you DESELECT the item.");
           ImGui.Text($"Vertical direction: {(dir < 0 ? "pushing down" : dir > 0 ? "pulling up" : "stationary")} — snap target follows movement.");
           if (Memory.LastFloorRaycastHit)
             ImGui.Text($"Distance to surface below (terrain included): {Memory.LastFloorRaycastDistance:0.###}");
@@ -127,6 +127,7 @@ namespace HousingUnlocked.Interface.Components
             ImGui.Text($"Effective snap range: {Memory.LastItemSnapEffectiveRange:0.###} (+{Configuration.SnapThreshold:0.###} safety)");
             ImGui.Text($"Range mode: {Configuration.ItemSnapRangeMode} — change with /hu itemsnapmode <either|sum|placed>");
             ImGui.Text("Ranges come from each item's SphereCastRange (0x4B) sgb block.");
+            ImGui.Text("Snap applies when you DESELECT the item.");
             ImGui.EndTooltip();
           }
         }
@@ -147,6 +148,7 @@ namespace HousingUnlocked.Interface.Components
             ImGui.Text($"Surface: {tableName}");
             ImGui.Text($"Surface Y: {Memory.LastTableSnapSurfaceY:0.###} (item pivot \u0394Y {Memory.LastTableSnapDeltaY:0.###})");
             ImGui.Text("Tabletop items attach to TableTop collision surfaces when close.");
+            ImGui.Text("Snap applies when you DESELECT the item.");
             ImGui.EndTooltip();
           }
         }
@@ -168,6 +170,7 @@ namespace HousingUnlocked.Interface.Components
             ImGui.Text($"Distance: {Memory.LastWallSnapDistance:0.###}");
             ImGui.Text($"Wall snap threshold: {Memory.LastWallSnapThreshold:0.###} (+{Configuration.SnapThreshold:0.###} safety)");
             ImGui.Text("Wall items (skylights, wallboards, etc.) attach to WallCollisionMesh surfaces — including stage panels and other false walls.");
+            ImGui.Text("Snap applies when you DESELECT the item.");
             ImGui.EndTooltip();
           }
         }
