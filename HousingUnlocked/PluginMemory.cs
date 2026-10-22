@@ -871,12 +871,16 @@ namespace HousingUnlocked
         var overZ = bbMin.Z <= t.BB.Max.Z && bbMax.Z >= t.BB.Min.Z;
         if (!overX || !overZ) continue;
 
-        // …and its base within the footprint-derived reach above the surface
-        // (a negative gap means the base is inside the table — still snaps).
-        var gap = surfaceY - bbMin.Y;
-        if (gap < nearestGap)
-          nearestGap = gap;
-        if (gap > reach) continue;
+        // Base height above the tabletop (positive = floating above it).
+        var above = bbMin.Y - surfaceY;
+        if (above < nearestGap)
+          nearestGap = above;
+
+        // Entirely below the tabletop → not a tabletop snap.
+        if (bbMax.Y < surfaceY) continue;
+
+        // Too high above the surface for this item's reach → no snap.
+        if (above > reach) continue;
 
         var dy = System.Math.Abs(surfaceY - pos.Y);
         if (dy < best)
