@@ -1244,13 +1244,40 @@ namespace HousingUnlocked
         return;
       }
 
-      // Wall snap capture: 1.0 yalm flat for ALL wall surfaces — house walls and
-      // furniture false walls alike (measured in-game: the skylight snaps at
-      // pivot distance 0.99 from the wall plane and does not snap at 1.00).
-      // There is no per-item derived range for wall snapping.
+      // Per-item wall snap distance — the item's OWN value, identical for every
+      // wall surface ("a wall is a wall"): house wall, stage panel, partition.
+      // Derived from the item's collision bounds: min(half-extents) / 2.
+      // Skylight: min-half 1.9934 / 2 = 0.9967 — matching the in-game measured
+      // boundary (snaps at 0.99, does not snap at 1.00).
       var config = Plugin.GetConfiguration();
-      var limit = config.WallCaptureDistance;
-      LastWallSnapThreshold = config.WallCaptureDistance;
+      var capture = config.WallCaptureDistance; // fallback if no collision data
+      {
+        var minHalf = float.MaxValue;
+        var cInstances = active->Instances.Instances;
+        var cSize = (int)(cInstances.Last - cInstances.First);
+        for (int i = 0; i < cSize; i++)
+        {
+          var childPtr = cInstances.First[i];
+          if (childPtr.Value == null) continue;
+          var ci = childPtr.Value->Instance;
+          if (ci == null) continue;
+          if (ci->Id.Type != InstanceType.BgPart) continue;
+          var bgPart = (BgPartsLayoutInstance*)ci;
+          var collider = bgPart->Collider;
+          if (collider == null || collider->GetColliderType() != ColliderType.Mesh) continue;
+          var meshCol = (ColliderMesh*)collider;
+          if (meshCol->MeshIsSimple || meshCol->Mesh == null) continue;
+          var pcb = (MeshPCB*)meshCol->Mesh;
+          if (pcb->RootNode == null) continue;
+          var lb = pcb->RootNode->LocalBounds;
+          var half = (lb.Max - lb.Min) / 2f;
+          minHalf = MathF.Min(minHalf, MathF.Min(half.X, MathF.Min(half.Y, half.Z)));
+        }
+        if (minHalf > 0f && minHalf < float.MaxValue) capture = minHalf / 2f;
+      }
+      var limit = capture;
+      var territoryLimit = capture;
+      LastWallSnapThreshold = capture;
 
       // Probe points: the item pivot only.
       var pos = active->Transform.Translation;
@@ -1344,11 +1371,7 @@ namespace HousingUnlocked
       }
 
       // Static territory walls (the house's own walls): cached once per zone and
-      // measured with the same one-sided triangle test. House walls snap wall
-      // items on DESELECT with a capture distance of 1.0 yalms — MEASURED
-      // IN-GAME: the skylight snaps at pivot 0.99 from the wall plane (X=-19.01
-      // on the X=-20 wall) and does not snap at 1.00 (X=-19.0).
-      var territoryLimit = config.WallCaptureDistance;
+      // measured with the same one-sided triangle test. Same per-item capture.
       EnsureTerritoryWallCache(allowDeep: false);
       if (_territoryWallCache.Count == 0)
         EnsureTerritoryWallCache(allowDeep: true);
@@ -1369,7 +1392,7 @@ namespace HousingUnlocked
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), wall capture {limit:0.###} (house + furniture), pivot probe";
+      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), wall capture {capture:0.####} (item min-half/2), pivot probe";
 
       if (furnHit || terrHit)
       {
