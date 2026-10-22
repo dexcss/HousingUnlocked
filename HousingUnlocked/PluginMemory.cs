@@ -1340,7 +1340,7 @@ namespace HousingUnlocked
             childM,
             probes, limit, cached.Name,
             ref bestFurn, ref bestFurnName, ref wallTris, ref hadWallTris,
-            itemFront, acceptBackSide: true);
+            itemFront);
         }
 
         // Embedded-census fallback: known wall receiver, but no wall triangles were
@@ -1479,8 +1479,10 @@ namespace HousingUnlocked
         foreach (var probe in probes)
         {
           // Side eligibility (which faces may accept items):
-          //  - house/territory walls: either side (the face is one-sided; the ray decides)
-          //  - furniture false walls: the back (anti-normal) side only.
+          //  - house/territory walls: either side (the back-ray decides)
+          //  - furniture false walls: the side the wall-triangle normal points at
+          //    (the panel's snapping face). Turning the panel around flips the
+          //    normal, so the room side becomes the back and nothing attaches.
           var side = Vector3.Dot(n, probe - a);
           if (!acceptBothSides && (acceptBackSide ? side > 0f : side < 0f)) continue;
 
