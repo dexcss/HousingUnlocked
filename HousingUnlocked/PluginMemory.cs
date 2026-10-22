@@ -1321,7 +1321,8 @@ namespace HousingUnlocked
             (BgPartsLayoutInstance*)ci,
             childM,
             probes, limit, cached.Name,
-            ref bestFurn, ref bestFurnName, ref wallTris, ref hadWallTris);
+            ref bestFurn, ref bestFurnName, ref wallTris, ref hadWallTris,
+            acceptBackSide: true);
         }
 
         // Embedded-census fallback: known wall receiver, but no wall triangles were
@@ -1394,7 +1395,8 @@ namespace HousingUnlocked
     /// </summary>
     private static unsafe void WalkWallTriangles(
       BgPartsLayoutInstance* bgPart, Matrix4x4 world, List<Vector3> probes, float limit,
-      string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall)
+      string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
+      bool acceptBackSide = false)
     {
       var collider = bgPart->Collider;
       if (collider == null || collider->GetColliderType() != ColliderType.Mesh) return;
@@ -1403,13 +1405,13 @@ namespace HousingUnlocked
       var pcb = (MeshPCB*)meshCol->Mesh;
       if (pcb->RootNode == null) return;
 
-      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0);
+      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide);
     }
 
     private static unsafe void WalkNode(
       MeshPCB.FileNode* node, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      HashSet<nint> visited, int depth)
+      HashSet<nint> visited, int depth, bool acceptBackSide)
     {
       if (node == null || depth > 64) return;
       if (!visited.Add((nint)node)) return;
@@ -1456,8 +1458,13 @@ namespace HousingUnlocked
 
         foreach (var probe in probes)
         {
-          // One-sided: only the front (normal) side of the surface accepts items.
-          if (Vector3.Dot(n, probe - a) < 0f) continue;
+          // Side rule (measured in-game):
+          //  - house/territory walls: FRONT (normal) side accepts wall items
+          //  - furniture false walls: the BACK (anti-normal) side accepts them —
+          //    a stage panel facing the room holds wall items on its back; if it
+          //    is turned around (snap face toward the wall) nothing attaches.
+          var side = Vector3.Dot(n, probe - a);
+          if (acceptBackSide ? side > 0f : side < 0f) continue;
           var d = DistancePointTriangle(probe, a, b, c);
           if (d < best)
           {
@@ -1467,8 +1474,8 @@ namespace HousingUnlocked
         }
       }
 
-      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1);
-      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1);
+      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide);
+      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide);
     }
 
     /// <summary>Decodes a mesh vertex (raw floats, or compressed ushorts scaled into the node bounds).</summary>
