@@ -175,7 +175,7 @@ namespace HousingUnlocked.Interface.Components
             ImGui.BeginTooltip();
             ImGui.Text($"Surface: {wallName}");
             ImGui.Text($"Distance: {Memory.LastWallSnapDistance:0.###}");
-            ImGui.Text($"Wall snap threshold: {Memory.LastWallSnapThreshold:0.###} (measured capture)");
+            ImGui.Text($"Wall snap distance (item collision): {Memory.LastWallSnapThreshold:0.###}");
             if (Memory.LastWallSnapTargetIsTerritory)
               ImGui.Text("House walls snap the item on DESELECT.");
             else
