@@ -198,6 +198,14 @@ namespace HousingUnlocked
     public float ActiveItemSnapThreshold { get; private set; } = 0f;
 
     /// <summary>
+    /// True when ActiveItemSnapThreshold comes from authored engine data
+    /// (SphereCastRange override, wall TargetMarker distance, or a manual
+    /// /hu learn measurement). Authored values are EXACT — the safety margin
+    /// must not be added. False = formula-derived (approximate, margin applies).
+    /// </summary>
+    public bool ActiveItemThresholdIsOverride { get; private set; } = false;
+
+    /// <summary>
     /// Forces the next call to <see cref="GetActiveItemFFXIVId"/> to re-read the
     /// active item's data even if the underlying pointer hasn't changed. Used
     /// after editing per-item config (overrides) so the cached threshold picks
@@ -1230,55 +1238,33 @@ namespace HousingUnlocked
         return;
       }
 
-      // Wall snap threshold for this item. Priority: TargetMarker children read
-      // at runtime, then the embedded sgb threshold table, then whatever the
-      // priority chain in GetActiveItemFFXIVId stored.
-      float threshold = ActiveItemSnapThreshold;
-      if (threshold <= 0f)
-      {
-        var wm = GetWallTargetMarkerDistance(active, active->Transform.Translation);
-        if (wm.HasValue && wm.Value > 0f)
-          threshold = wm.Value;
-        else if (activeItemId != 0 && SnapRangeData.TryGetWallThreshold(activeItemId, out var wtd))
-          threshold = wtd;
-      }
-      if (threshold <= 0f)
+      // Wall projection capture base: the item's FULL TargetMarker distance.
+      // Measured in-game: the skylight (marker distance 3.0) projects onto the
+      // wall from pivot distance 3.25. The halved value (x0.5) is the float-
+      // distance metric — a different thing — so use the full distance here.
+      float wallBase = 0f;
+      var wm = GetWallTargetMarkerDistance(active, active->Transform.Translation);
+      if (wm.HasValue && wm.Value > 0f)
+        wallBase = wm.Value * 2f;
+      else if (activeItemId != 0 && SnapRangeData.TryGetWallThreshold(activeItemId, out var wtd))
+        wallBase = wtd * 2f;
+      else if (ActiveItemSnapThreshold > 0f)
+        wallBase = ActiveItemSnapThreshold;
+      if (wallBase <= 0f)
       {
         WallSnapDiagnostic = "no wall threshold (no TargetMarker children)";
         return;
       }
-      LastWallSnapThreshold = threshold;
+      LastWallSnapThreshold = wallBase;
 
       var config = Plugin.GetConfiguration();
-      // Wall-item projection capture: the engine pulls wall items back onto the
-      // wall plane on deselect from FURTHER than the TargetMarker threshold
-      // (measured: projected from 3.25, silent from 5.76) — so the warning limit
-      // is threshold + WallCaptureMargin rather than the floor-snap safety.
-      var limit = threshold + config.WallCaptureMargin;
+      var limit = wallBase + config.WallCaptureMargin;
 
-      // Probe points: the item pivot plus every TargetMarker offset, rotated
-      // into world space by the item's yaw.
+      // Probe points: the item pivot only. The TargetMarker distance is already
+      // accounted for in the capture limit; marker probes would double-count
+      // (they sit up to wallBase behind the item and hit walls behind it).
       var pos = active->Transform.Translation;
-      var rot = active->Transform.Rotation;
-      var yaw = MathF.Atan2(2.0f * (rot.W * rot.Y + rot.X * rot.Z), 1.0f - 2.0f * (rot.Y * rot.Y + rot.X * rot.X));
-      var cosY = MathF.Cos(yaw);
-      var sinY = MathF.Sin(yaw);
-
       var probes = new List<Vector3> { pos };
-      var instances = active->Instances.Instances;
-      var size = (int)(instances.Last - instances.First);
-      for (int i = 0; i < size; i++)
-      {
-        var childPtr = instances.First[i];
-        if (childPtr.Value == null) continue;
-        var ci = childPtr.Value->Instance;
-        if (ci == null) continue;
-        if (ci->Id.Type != InstanceType.TargetMarker) continue;
-        // Child instance transforms are WORLD-space (layout engine flattens the
-        // group hierarchy) — use the marker translation directly as a probe.
-        var t = *ci->GetTransformImpl();
-        probes.Add(t.Translation);
-      }
 
       // One-sided wall surface scan: walk placed receivers' wall-flagged collision
       // triangles in world space and measure each probe against the FRONT side only.
@@ -1386,7 +1372,7 @@ namespace HousingUnlocked
         WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, limit, "wall/terrain", ref best, ref bestName, ref wallTris, ref dummy);
       }
 
-      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), threshold {threshold:0.###} +safety {config.SnapThreshold:0.###} = {limit:0.###}, probes {probes.Count}";
+      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture = marker {wallBase:0.###} +margin {config.WallCaptureMargin:0.##} = {limit:0.###}, pivot probe";
 
       if (best <= limit)
       {
@@ -1656,11 +1642,18 @@ namespace HousingUnlocked
       // 1. Manual override (/hu learn) — user-measured, always wins.
       // 2. SphereCastRange override read at runtime (sgb type 0x4B -> Cast.X).
       // 3. Embedded .sgb table fallback (instance children may not be streamed in).
-      // 4. Regular snap: shortest-edge / 2 from the collider footprint.
+      // 4. Wall items: authored TargetMarker distance.
+      // 5. Regular snap: shortest-edge / 2 from the collider footprint.
+      //
+      // Authored values (1-4) are EXACT — in-game confirmed: the Stage Panel's
+      // authored 0.1 snaps at 0.100 and is free at 0.101, so the safety margin
+      // must NOT be added to them. Only the approximate formula (5) gets the
+      // user's safety margin (the formula can underestimate, e.g. Grassy Rug).
       var config = Plugin.GetConfiguration();
       if (_cachedActiveItemId != 0 && config.SnapOverrides.TryGetValue(_cachedActiveItemId, out var overridden))
       {
         ActiveItemSnapThreshold = overridden;
+        ActiveItemThresholdIsOverride = true;
         SnapThresholdDiagnostic = $"override (manual /hu learn) -> {overridden:0.###}";
       }
       else
@@ -1669,12 +1662,14 @@ namespace HousingUnlocked
         if (runtimeRange.HasValue)
         {
           ActiveItemSnapThreshold = runtimeRange.Value;
+          ActiveItemThresholdIsOverride = true;
           ActiveItemSphereCastSource = "runtime";
           SnapThresholdDiagnostic = $"SphereCastRange override (runtime) -> {runtimeRange.Value:0.####}";
         }
         else if (_cachedActiveItemId != 0 && SnapRangeData.TryGetSnapRange(_cachedActiveItemId, out var tableRange))
         {
           ActiveItemSnapThreshold = tableRange;
+          ActiveItemThresholdIsOverride = true;
           ActiveItemSphereCastSource = "sgb table";
           SnapThresholdDiagnostic = $"SphereCastRange override (sgb table) -> {tableRange:0.####}";
         }
@@ -1689,21 +1684,25 @@ namespace HousingUnlocked
           if (wallDist.HasValue && wallDist.Value > 0f)
           {
             ActiveItemSnapThreshold = wallDist.Value;
+            ActiveItemThresholdIsOverride = true;
             SnapThresholdDiagnostic = $"wall TargetMarker -> {wallDist.Value:0.####}";
           }
           else if (_cachedActiveItemId != 0 && SnapRangeData.TryGetWallThreshold(_cachedActiveItemId, out var wt))
           {
             ActiveItemSnapThreshold = wt;
+            ActiveItemThresholdIsOverride = true;
             SnapThresholdDiagnostic = $"wall threshold (sgb table) -> {wt:0.####}";
           }
           else
           {
+            ActiveItemThresholdIsOverride = false;
             ActiveItemSnapThreshold = ComputeSnapThresholdForActiveItem();
           }
         }
         else
         {
           ActiveItemSphereCastSource = "(none)";
+          ActiveItemThresholdIsOverride = false;
           ActiveItemSnapThreshold = ComputeSnapThresholdForActiveItem();
         }
       }

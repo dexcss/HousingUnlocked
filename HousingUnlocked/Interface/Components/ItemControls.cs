@@ -64,13 +64,12 @@ namespace HousingUnlocked.Interface.Components
       var snapsUp = dir > 0 ? true : dir < 0 ? false : ceilD < floorD;
       var directionalDistance = snapsUp ? ceilD : floorD;
 
-      // Per-item threshold from collision-mesh footprint: min(width, depth) / 2.
-      // Falls back to the configurable global threshold if collider data isn't available
-      // (e.g. item collider not yet loaded). Configurable threshold also applies as a
-      // small additive safety margin so we warn slightly before the actual snap fires.
+      // Authored thresholds (SphereCastRange / wall marker / manual learn) are
+      // EXACT — in-game confirmed: Stage Panel snaps at 0.100, free at 0.101 —
+      // so the safety margin is only added for approximate formula thresholds.
       var perItemThreshold = Memory.ActiveItemSnapThreshold;
       var effectiveThreshold = perItemThreshold > 0f
-        ? perItemThreshold + Configuration.SnapThreshold
+        ? perItemThreshold + (Memory.ActiveItemThresholdIsOverride ? 0f : Configuration.SnapThreshold)
         : Configuration.SnapThreshold;
       var inSnapZone = isFloorSnapItem && SnapData.IsInFloorSnapZone(
         activeItemId, directionalDistance, effectiveThreshold);
@@ -100,7 +99,7 @@ namespace HousingUnlocked.Interface.Components
           else
             ImGui.Text("No surface detected above the item (open air).");
           if (perItemThreshold > 0f)
-            ImGui.Text($"Per-item snap distance: {perItemThreshold:0.###}  (+{Configuration.SnapThreshold:0.###} safety = {effectiveThreshold:0.###})");
+            ImGui.Text(Memory.ActiveItemThresholdIsOverride ? $"Per-item snap distance: {perItemThreshold:0.###} (authored exact)" : $"Per-item snap distance: {perItemThreshold:0.###}  (+{Configuration.SnapThreshold:0.###} safety = {effectiveThreshold:0.###})");
           else
             ImGui.Text($"Per-item snap distance unavailable, using fallback {Configuration.SnapThreshold:0.###}.");
           ImGui.Text("Adjust safety margin with: /hu threshold <value>");

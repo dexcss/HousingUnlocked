@@ -54,10 +54,11 @@ namespace HousingUnlocked
     public bool ShowWallSnapWarning { get; set; } = true;
 
     // The engine PROJECTS wall items back onto the wall plane on deselect within
-    // a capture range larger than the TargetMarker threshold (measured in-game:
-    // projected from 3.25 yalms, did not project from 5.76). The warning limit
-    // for wall items is therefore marker threshold + this margin.
-    public float WallCaptureMargin { get; set; } = 2.5f;
+    // a capture range larger than the halved TargetMarker value (measured
+    // in-game: the skylight projects from pivot distance 3.25 = full marker
+    // distance 3.0 + 0.25). The warning limit is therefore full marker
+    // distance + this margin.
+    public float WallCaptureMargin { get; set; } = 0.25f;
 
     public void Save()
     {
