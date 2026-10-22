@@ -74,6 +74,42 @@ namespace HousingUnlocked.Interface.Components
       var inSnapZone = isFloorSnapItem && SnapData.IsInFloorSnapZone(
         activeItemId, directionalDistance, effectiveThreshold);
 
+      // Gather every snap state once, then show one universal status line for ALL
+      // items: RED = at least one snap will fire at this position, GREEN = none.
+      if (Configuration.ShowItemSnapWarning && activeItemId != 0)
+        Memory.UpdateItemSnapDetection();
+      if (Configuration.ShowTableSnapWarning && activeItemId != 0)
+        Memory.UpdateTableSnapDetection();
+      if (Configuration.ShowWallSnapWarning && activeItemId != 0)
+        Memory.UpdateWallSnapDetection();
+
+      var snapSummary = "";
+      if (inSnapZone)
+        snapSummary = snapsUp ? "floor above" : "floor";
+      if (Configuration.ShowItemSnapWarning && Memory.LastItemSnapHit)
+        snapSummary += (snapSummary.Length > 0 ? ", " : "") + "item: " +
+          (string.IsNullOrEmpty(Memory.LastItemSnapTargetName)
+            ? SnapRangeData.GetItemName(Memory.LastItemSnapTargetItemId)
+            : Memory.LastItemSnapTargetName);
+      if (Configuration.ShowTableSnapWarning && Memory.LastTableSnapHit)
+        snapSummary += (snapSummary.Length > 0 ? ", " : "") + "table: " +
+          (string.IsNullOrEmpty(Memory.LastTableSnapTargetName) ? "table" : Memory.LastTableSnapTargetName);
+      if (Configuration.ShowWallSnapWarning && Memory.LastWallSnapHit)
+        snapSummary += (snapSummary.Length > 0 ? ", " : "") + "wall: " +
+          (string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName);
+
+      if (snapSummary.Length > 0)
+        ImGui.TextColored(RED, $"\u26A0 WILL SNAP \u2014 {snapSummary}");
+      else
+        ImGui.TextColored(GREEN, "\u2713 GOOD \u2014 no snap");
+      if (ImGui.IsItemHovered())
+      {
+        ImGui.BeginTooltip();
+        ImGui.Text("RED = a snap will fire at this position.");
+        ImGui.Text("GREEN = no snap detected; the item stays where it is.");
+        ImGui.EndTooltip();
+      }
+
       if (Configuration.ShowSnapWarning && isFloorSnapItem)
       {
         if (inSnapZone)
@@ -112,13 +148,12 @@ namespace HousingUnlocked.Interface.Components
       // (each item's authored 0x4B override — see SnapRangeData).
       if (Configuration.ShowItemSnapWarning && activeItemId != 0)
       {
-        Memory.UpdateItemSnapDetection();
         if (Memory.LastItemSnapHit)
         {
           var snapName = string.IsNullOrEmpty(Memory.LastItemSnapTargetName)
             ? SnapRangeData.GetItemName(Memory.LastItemSnapTargetItemId)
             : Memory.LastItemSnapTargetName;
-          ImGui.TextColored(ORANGE, $"\u26A0 WILL SNAP TO ITEM: {snapName}");
+          ImGui.TextColored(RED, $"\u26A0 WILL SNAP TO ITEM: {snapName}");
           if (ImGui.IsItemHovered())
           {
             ImGui.BeginTooltip();
@@ -137,11 +172,10 @@ namespace HousingUnlocked.Interface.Components
       // TableTop collision surfaces of nearby placed furniture.
       if (Configuration.ShowTableSnapWarning && activeItemId != 0)
       {
-        Memory.UpdateTableSnapDetection();
         if (Memory.LastTableSnapHit)
         {
           var tableName = string.IsNullOrEmpty(Memory.LastTableSnapTargetName) ? "table" : Memory.LastTableSnapTargetName;
-          ImGui.TextColored(ORANGE, $"\u26A0 WILL SNAP TO TABLE: {tableName}");
+          ImGui.TextColored(RED, $"\u26A0 WILL SNAP TO TABLE: {tableName}");
           if (ImGui.IsItemHovered())
           {
             ImGui.BeginTooltip();
@@ -154,40 +188,26 @@ namespace HousingUnlocked.Interface.Components
         }
       }
 
-      // Wall status for wall-mounted items (shown in rotate mode): GREEN = the item
-      // will attach at this position; RED = nothing within reach. House walls have
-      // one attachable face but snap items forward onto it even from just behind the
-      // plane; furniture false walls attach on their back side.
-      if (Configuration.ShowWallSnapWarning && activeItemId != 0 && (int)Memory.ActiveItemCategory == 15)
+      // Wall snap detail (the universal status above handles green/red): house walls
+      // have one attachable face but snap items forward onto it even from just behind
+      // the plane; furniture false walls attach on their back side.
+      if (Configuration.ShowWallSnapWarning && activeItemId != 0 && (int)Memory.ActiveItemCategory == 15 && Memory.LastWallSnapHit)
       {
-        Memory.UpdateWallSnapDetection();
         var wallName = string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName;
-        if (Memory.LastWallSnapHit)
+        ImGui.TextColored(RED, Memory.LastWallSnapTargetIsTerritory
+          ? $"\u26A0 WILL SNAP TO WALL: {wallName}"
+          : $"\u26A0 WILL ATTACH TO: {wallName}");
+        if (ImGui.IsItemHovered())
         {
-          ImGui.TextColored(GREEN, $"\u2713 WILL ATTACH: {wallName}");
-          if (ImGui.IsItemHovered())
-          {
-            ImGui.BeginTooltip();
-            ImGui.Text($"Surface: {wallName}");
-            ImGui.Text($"Distance: {Memory.LastWallSnapDistance:0.###}");
-            ImGui.Text($"Wall snap distance: {Memory.LastWallSnapThreshold:0.###} (measured flat rule)");
-            if (Memory.LastWallSnapTargetIsTerritory)
-              ImGui.Text("House walls snap the item on DESELECT.");
-            else
-              ImGui.Text("False-wall furniture attaches when the housing interface closes or you re-enter the house.");
-            ImGui.EndTooltip();
-          }
-        }
-        else
-        {
-          ImGui.TextColored(RED, "\u2717 NO WALL ATTACH");
-          if (ImGui.IsItemHovered())
-          {
-            ImGui.BeginTooltip();
-            ImGui.Text("No wall surface within the flat 1.0 capture of the item pivot.");
-            ImGui.Text("Move toward a wall (or a stage panel's back) until this turns green.");
-            ImGui.EndTooltip();
-          }
+          ImGui.BeginTooltip();
+          ImGui.Text($"Surface: {wallName}");
+          ImGui.Text($"Distance: {Memory.LastWallSnapDistance:0.###}");
+          ImGui.Text($"Wall snap distance: {Memory.LastWallSnapThreshold:0.###} (measured flat rule)");
+          if (Memory.LastWallSnapTargetIsTerritory)
+            ImGui.Text("House walls snap the item on DESELECT.");
+          else
+            ImGui.Text("False-wall furniture attaches when the housing interface closes or you re-enter the house.");
+          ImGui.EndTooltip();
         }
       }
 
