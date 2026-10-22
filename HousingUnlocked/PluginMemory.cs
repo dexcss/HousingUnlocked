@@ -1271,6 +1271,11 @@ namespace HousingUnlocked
       var pos = active->Transform.Translation;
       var probes = new List<Vector3> { pos };
 
+      // The item's world front (+Z local). Wall items only attach when their front
+      // points the same way as the wall surface — flipping the item 180° (front
+      // toward the wall) kills the snap for house walls and false walls alike.
+      var itemFront = Vector3.Transform(Vector3.UnitZ, active->Transform.Rotation);
+
       // One-sided wall surface scan: walk placed receivers' wall-flagged collision
       // triangles in world space and measure each probe against the FRONT side only.
       // 32 of the game's 38 wall receivers are strictly one-sided (verified offline
@@ -1335,7 +1340,7 @@ namespace HousingUnlocked
             childM,
             probes, limit, cached.Name,
             ref bestFurn, ref bestFurnName, ref wallTris, ref hadWallTris,
-            acceptBackSide: true);
+            itemFront, acceptBackSide: true);
         }
 
         // Embedded-census fallback: known wall receiver, but no wall triangles were
@@ -1378,7 +1383,7 @@ namespace HousingUnlocked
         var dummy = false;
         // House walls: distance to the attachable face only — no half-space test,
         // so an item behind the plane (inside the wall) still snaps forward onto it.
-        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, territoryLimit, "house wall", ref bestTerr, ref bestTerrName, ref wallTris, ref dummy, acceptBothSides: true);
+        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, territoryLimit, "house wall", ref bestTerr, ref bestTerrName, ref wallTris, ref dummy, itemFront, acceptBothSides: true);
       }
 
       var furnHit = bestFurn <= limit;
@@ -1411,7 +1416,7 @@ namespace HousingUnlocked
     private static unsafe void WalkWallTriangles(
       BgPartsLayoutInstance* bgPart, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      bool acceptBackSide = false, bool acceptBothSides = false)
+      Vector3 itemFront, bool acceptBackSide = false, bool acceptBothSides = false)
     {
       var collider = bgPart->Collider;
       if (collider == null || collider->GetColliderType() != ColliderType.Mesh) return;
@@ -1420,13 +1425,13 @@ namespace HousingUnlocked
       var pcb = (MeshPCB*)meshCol->Mesh;
       if (pcb->RootNode == null) return;
 
-      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides);
+      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides, itemFront);
     }
 
     private static unsafe void WalkNode(
       MeshPCB.FileNode* node, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides)
+      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides, Vector3 itemFront)
     {
       if (node == null || depth > 64) return;
       if (!visited.Add((nint)node)) return;
@@ -1480,6 +1485,10 @@ namespace HousingUnlocked
           //    is turned around (snap face toward the wall) nothing attaches.
           var side = Vector3.Dot(n, probe - a);
           if (!acceptBothSides && (acceptBackSide ? side > 0f : side < 0f)) continue;
+          // Facing: the item only attaches when its front points the same way as the
+          // attachable surface. Flipping it 180° (front toward the wall) disables the
+          // snap for house walls and furniture false walls alike (measured in-game).
+          if (Vector3.Dot(itemFront, n) < 0f) continue;
           var d = DistancePointTriangle(probe, a, b, c);
           if (d < best)
           {
@@ -1489,8 +1498,8 @@ namespace HousingUnlocked
         }
       }
 
-      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides);
-      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides);
+      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
+      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
     }
 
     /// <summary>Decodes a mesh vertex (raw floats, or compressed ushorts scaled into the node bounds).</summary>
