@@ -53,13 +53,10 @@ namespace HousingUnlocked
     // stage panels and partitions) is within the item's wall snap threshold.
     public bool ShowWallSnapWarning { get; set; } = true;
 
-    // Epsilon added on top of the DERIVED wall capture base for furniture false
-    // walls (which attach on interface exit / re-entry).
-    public float WallCaptureMargin { get; set; } = 0.25f;
-
-    // House-wall (territory) snap capture distance — MEASURED IN-GAME: the
-    // imitation skylight snaps at pivot distance 0.99 from the wall plane and
-    // does not snap at 1.00. House walls snap wall items on deselect.
+    // Wall snap capture distance — MEASURED IN-GAME: the imitation skylight
+    // snaps at pivot distance 0.99 from a wall plane and does not snap at 1.00,
+    // for house walls AND furniture false walls alike (flat rule, no per-item
+    // derivation).
     public float WallCaptureDistance { get; set; } = 1.0f;
 
     public void Save()

@@ -1244,93 +1244,15 @@ namespace HousingUnlocked
         return;
       }
 
-      // Wall projection capture base — the EXACT reason, per item:
-      // 1. Authored SphereCastRange (Cast.X) when the item carries a 0x4B block
-      //    (e.g. Slanted Wall 0.001 = effectively never projects).
-      // 2. Otherwise DERIVED from the item's own collision bounds: the engine
-      //    sphere-queries from the pivot with the collision half-extent along the
-      //    marker axis (skylight: collision half-Z = 3.25 — matches the measured
-      //    projection distance exactly).
-      // 3. Fallback: the TargetMarker distance itself.
-      float wallBase = 0f;
-      var wallBaseSrc = "";
-      var scrWall = GetSphereCastRangeOverride(active);
-      if (scrWall.HasValue && scrWall.Value > 0f)
-      {
-        wallBase = scrWall.Value;
-        wallBaseSrc = $"authored SCR {wallBase:0.####}";
-      }
-      else
-      {
-        // dominant marker axis: which model axis the markers reach along
-        var axisSum = Vector3.Zero;
-        var aInstances = active->Instances.Instances;
-        var aSize = (int)(aInstances.Last - aInstances.First);
-        for (int i = 0; i < aSize; i++)
-        {
-          var childPtr = aInstances.First[i];
-          if (childPtr.Value == null) continue;
-          var ci = childPtr.Value->Instance;
-          if (ci == null) continue;
-          if (ci->Id.Type != InstanceType.TargetMarker) continue;
-          axisSum += new Vector3(
-            MathF.Abs((*ci->GetTransformImpl()).Translation.X),
-            MathF.Abs((*ci->GetTransformImpl()).Translation.Y),
-            MathF.Abs((*ci->GetTransformImpl()).Translation.Z));
-        }
-        var axis = 2;
-        if (axisSum.X > axisSum.Y && axisSum.X > axisSum.Z) axis = 0;
-        else if (axisSum.Y > axisSum.Z) axis = 1;
-
-        // derived: max collision half-extent along that axis, across children
-        var derived = 0f;
-        var wInstances = active->Instances.Instances;
-        var wSize = (int)(wInstances.Last - wInstances.First);
-        for (int i = 0; i < wSize; i++)
-        {
-          var childPtr = wInstances.First[i];
-          if (childPtr.Value == null) continue;
-          var ci = childPtr.Value->Instance;
-          if (ci == null) continue;
-          if (ci->Id.Type != InstanceType.BgPart) continue;
-          var bgPart = (BgPartsLayoutInstance*)ci;
-          var collider = bgPart->Collider;
-          if (collider == null || collider->GetColliderType() != ColliderType.Mesh) continue;
-          var meshCol = (ColliderMesh*)collider;
-          if (meshCol->MeshIsSimple || meshCol->Mesh == null) continue;
-          var pcb = (MeshPCB*)meshCol->Mesh;
-          if (pcb->RootNode == null) continue;
-          var lb = pcb->RootNode->LocalBounds;
-          var half = (lb.Max - lb.Min) / 2f;
-          derived = MathF.Max(derived, axis == 0 ? half.X : axis == 1 ? half.Y : half.Z);
-        }
-        if (derived > 0f)
-        {
-          wallBase = derived;
-          wallBaseSrc = $"collision half-extent (axis {axis})";
-        }
-      }
-      if (wallBase <= 0f)
-      {
-        var wm = GetWallTargetMarkerDistance(active, active->Transform.Translation);
-        if (wm.HasValue && wm.Value > 0f)
-        {
-          wallBase = wm.Value * 2f; // full TargetMarker distance
-          wallBaseSrc = "TargetMarker distance";
-        }
-      }
-      if (wallBase <= 0f)
-      {
-        WallSnapDiagnostic = "no wall threshold (no TargetMarker children)";
-        return;
-      }
-      LastWallSnapThreshold = wallBase;
-
+      // Wall snap capture: 1.0 yalm flat for ALL wall surfaces — house walls and
+      // furniture false walls alike (measured in-game: the skylight snaps at
+      // pivot distance 0.99 from the wall plane and does not snap at 1.00).
+      // There is no per-item derived range for wall snapping.
       var config = Plugin.GetConfiguration();
-      var limit = wallBase + config.WallCaptureMargin;
+      var limit = config.WallCaptureDistance;
+      LastWallSnapThreshold = config.WallCaptureDistance;
 
-      // Probe points: the item pivot only. The capture radius already accounts
-      // for the item's size; marker probes would double-count.
+      // Probe points: the item pivot only.
       var pos = active->Transform.Translation;
       var probes = new List<Vector3> { pos };
 
@@ -1447,7 +1369,7 @@ namespace HousingUnlocked
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), furniture capture {wallBaseSrc} {wallBase:0.####}+{config.WallCaptureMargin:0.##} = {limit:0.###}, house-wall capture {territoryLimit:0.###}, pivot probe";
+      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), wall capture {limit:0.###} (house + furniture), pivot probe";
 
       if (furnHit || terrHit)
       {
