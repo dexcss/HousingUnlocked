@@ -1367,15 +1367,20 @@ namespace HousingUnlocked
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), wall capture {capture:0.###} (flat, measured), pivot probe";
+      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), wall capture {capture:0.###} flat; furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}), territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
 
       if (furnHit || terrHit)
       {
-        var useTerritory = terrHit && (!furnHit || bestTerr <= bestFurn);
+        // PRIORITY RULE (measured in-game): furniture false walls (stage panels,
+        // partitions) take priority over house/territory walls. The wall lantern
+        // at Z=-12 snapped to the stage panel even though the house wall was
+        // ~0.01 away; at Z=-12.01 (outside the panel's capture) it fell back to
+        // the house wall. So if furniture is in capture, it wins outright.
+        var useFurniture = furnHit;
         LastWallSnapHit = true;
-        LastWallSnapDistance = useTerritory ? bestTerr : bestFurn;
-        LastWallSnapTargetName = useTerritory ? bestTerrName : bestFurnName;
-        LastWallSnapTargetIsTerritory = useTerritory;
+        LastWallSnapDistance = useFurniture ? bestFurn : bestTerr;
+        LastWallSnapTargetName = useFurniture ? bestFurnName : bestTerrName;
+        LastWallSnapTargetIsTerritory = !useFurniture;
       }
     }
 
