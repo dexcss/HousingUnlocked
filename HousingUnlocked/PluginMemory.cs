@@ -428,6 +428,13 @@ namespace HousingUnlocked
     /// <summary>True once the active item has been moved since it was selected.</summary>
     public bool ActiveItemMovedSinceSelect { get; private set; }
 
+    // The collider world bounds can lag behind the transform while an item is being
+    // dragged. The pivot-relative top is captured once per selection so the floor-
+    // above distance stays stable during movement.
+    private nint _heightOffsetGroup;
+    private float _heightOffsetTop;
+    private bool _heightOffsetValid;
+
     // ==== Layout drift watch ====
     // Catches the "snaps when you re-instance" behavior: every 2 seconds the
     // positions of all placed items are compared against the previous snapshot;
@@ -617,6 +624,17 @@ namespace HousingUnlocked
       if (float.IsPositiveInfinity(lowestY)) lowestY = pos.Y;
       if (float.IsNegativeInfinity(highestY)) highestY = pos.Y;
 
+      // Capture the pivot-relative top once per selection: the collider world bounds
+      // lag while dragging (they can still be at the previous floor height), which
+      // made the floor-above distance wrong. Reuse the captured height afterwards.
+      if (_heightOffsetGroup != (nint)active)
+      {
+        _heightOffsetGroup = (nint)active;
+        _heightOffsetTop = highestY - pos.Y;
+        _heightOffsetValid = true;
+      }
+      var itemTop = _heightOffsetValid ? pos.Y + _heightOffsetTop : highestY;
+
       const float Epsilon = 0.001f;
 
       // === Downward ray: distance to floor below the item ===
@@ -671,9 +689,9 @@ namespace HousingUnlocked
 
           // Floor-above case: floor Y is above the item's top. Distance from
           // item.top up to this floor.
-          if (floorY > highestY)
+          if (floorY > itemTop)
           {
-            var gap = floorY - highestY;
+            var gap = floorY - itemTop;
             if (gap < ceilingGap)
             {
               ceilingGap = gap;
