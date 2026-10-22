@@ -1244,41 +1244,16 @@ namespace HousingUnlocked
         return;
       }
 
-      // Per-item wall snap distance — the item's OWN value, identical for every
-      // wall surface ("a wall is a wall"): house wall, stage panel, partition.
-      // Derived from the item's collision bounds: min(half-extents) / 2.
-      // Skylight: min-half 1.9934 / 2 = 0.9967 — matching the in-game measured
-      // boundary (snaps at 0.99, does not snap at 1.00).
+      // Wall snap capture: 1.0 yalm flat for ALL wall-mounted items and ALL wall
+      // surfaces — MEASURED IN-GAME on the X=-20 house wall: the skylight, indoor
+      // awning, mounted box shelf, crescent wall rack and wall lantern ALL snap at
+      // 0.99 and not at 1.00. Fox's item list carries no per-item wall-snap data
+      // (365/369 wall-mounted items have no override), confirming a flat rule.
       var config = Plugin.GetConfiguration();
-      var capture = config.WallCaptureDistance; // fallback if no collision data
-      {
-        var minHalf = float.MaxValue;
-        var cInstances = active->Instances.Instances;
-        var cSize = (int)(cInstances.Last - cInstances.First);
-        for (int i = 0; i < cSize; i++)
-        {
-          var childPtr = cInstances.First[i];
-          if (childPtr.Value == null) continue;
-          var ci = childPtr.Value->Instance;
-          if (ci == null) continue;
-          if (ci->Id.Type != InstanceType.BgPart) continue;
-          var bgPart = (BgPartsLayoutInstance*)ci;
-          var collider = bgPart->Collider;
-          if (collider == null || collider->GetColliderType() != ColliderType.Mesh) continue;
-          var meshCol = (ColliderMesh*)collider;
-          if (meshCol->MeshIsSimple || meshCol->Mesh == null) continue;
-          var pcb = (MeshPCB*)meshCol->Mesh;
-          if (pcb->RootNode == null) continue;
-          var lb = pcb->RootNode->LocalBounds;
-          var half = (lb.Max - lb.Min) / 2f;
-          minHalf = MathF.Min(minHalf, MathF.Min(half.X, MathF.Min(half.Y, half.Z)));
-        }
-        if (minHalf > 0f && minHalf < float.MaxValue) capture = minHalf / 2f;
-      }
+      var capture = config.WallCaptureDistance;
       var limit = capture;
       var territoryLimit = capture;
       LastWallSnapThreshold = capture;
-
       // Probe points: the item pivot only.
       var pos = active->Transform.Translation;
       var probes = new List<Vector3> { pos };
@@ -1392,7 +1367,7 @@ namespace HousingUnlocked
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), wall capture {capture:0.####} (item min-half/2), pivot probe";
+      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), wall capture {capture:0.###} (flat, measured), pivot probe";
 
       if (furnHit || terrHit)
       {
