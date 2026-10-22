@@ -826,8 +826,18 @@ namespace HousingUnlocked
         return;
       }
 
-      var config = Plugin.GetConfiguration();
-      var margin = config.SnapThreshold + 0.05f;
+      // The engine re-seats a tabletop item only when its body intersects the
+      // TableTop surface on commit. Measured: three items floated at the same pivot
+      // height above a Used Banquet Table — only the one whose collider crossed the
+      // surface snapped when the house reloaded. So test AABB overlap, not pivot
+      // distance.
+      var bounds = GetActiveItemWorldBounds();
+      if (!bounds.HasValue)
+      {
+        TableSnapDiagnostic = "active item bounds unavailable";
+        return;
+      }
+      var bb = bounds.Value;
 
       var candidates = GetNearbyTableSurfaces();
       float best = float.PositiveInfinity;
@@ -835,16 +845,26 @@ namespace HousingUnlocked
       float bestSurfaceY = 0f;
       foreach (var t in candidates)
       {
-        var dy = System.Math.Abs(t.BB.Max.Y - pos.Y);
-        if (dy <= margin && dy < best)
+        var surfaceY = t.BB.Max.Y;
+
+        // The item must be horizontally over the table…
+        var overX = bb.Min.X <= t.BB.Max.X && bb.Max.X >= t.BB.Min.X;
+        var overZ = bb.Min.Z <= t.BB.Max.Z && bb.Max.Z >= t.BB.Min.Z;
+        if (!overX || !overZ) continue;
+
+        // …and its body must cross the tabletop plane (bottom below, top above).
+        if (bb.Min.Y > surfaceY || bb.Max.Y < surfaceY) continue;
+
+        var dy = System.Math.Abs(surfaceY - pos.Y);
+        if (dy < best)
         {
           best = dy;
           bestName = t.Name;
-          bestSurfaceY = t.BB.Max.Y;
+          bestSurfaceY = surfaceY;
         }
       }
 
-      TableSnapDiagnostic = $"{candidates.Count} TableTop receiver(s) nearby, item pivot Y {pos.Y:0.###}, margin {margin:0.###}";
+      TableSnapDiagnostic = $"{candidates.Count} TableTop receiver(s), item Y [{bb.Min.Y:0.###}..{bb.Max.Y:0.###}] pivot {pos.Y:0.###}";
 
       if (best != float.PositiveInfinity)
       {
