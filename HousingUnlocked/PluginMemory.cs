@@ -1161,11 +1161,13 @@ namespace HousingUnlocked
       _territoryWallCache.Clear();
       _territoryWallCacheTerritory = tid;
       _territoryWallCacheBuilt = DateTime.Now;
-      if (allowDeep) _territoryWallCacheDeep = true;
 
       int scanned = 0, walls = 0;
       if (lm == null || lm->InitState != 7)
       {
+        // Do not cache the failure for 10 minutes: retry on the next check.
+        _territoryWallCacheBuilt = DateTime.MinValue;
+        _territoryWallCacheDeep = false;
         TerritoryWallCacheDiagnostic = "layout not ready";
         return;
       }
@@ -1204,6 +1206,7 @@ namespace HousingUnlocked
           walls++;
         }
       }
+      _territoryWallCacheDeep = allowDeep;
       TerritoryWallCacheDiagnostic = $"{scanned} bgparts scanned, {walls} wall surfaces cached{(allowDeep ? " (deep)" : "")} at {DateTime.Now:HH:mm:ss}";
       SnapLogger.Event("wallcache", TerritoryWallCacheDiagnostic);
     }
@@ -1212,12 +1215,13 @@ namespace HousingUnlocked
     /// Wall snap: wall-mounted items (HousingItemCategory 15) snap onto wall
     /// collision surfaces — including "false walls" (Stage Panels, partitions,
     /// wardrobes) whose meshes carry the WallCollisionMesh material flag
-    /// (nibble d3 == 1, bits 20..23). The check is one-sided: each wall triangle's
-    /// real geometric normal decides which side accepts items (32 of the 38 wall
-    /// receivers are strictly one-sided — the back of a stage panel does nothing).
+    /// (nibble d3 == 1, bits 20..23). House walls have ONE attachable face, but the
+    /// snap is distance-based: an item slightly BEHIND the face still snaps forward
+    /// onto it (measured: lantern at Z=-12.04 snapped forward to the Z=-12 wall, and
+    /// kept attaching up to 1.0 behind, Z=-13). Furniture false walls (stage panels)
+    /// accept on their back side only — turning the panel around breaks the attach.
     /// Fires when the item's pivot or any of its TargetMarker points comes within
-    /// the item's wall snap threshold (max TargetMarker XZ distance x 0.5) of a
-    /// front-facing wall triangle.
+    /// the flat 1.0 capture of a wall triangle.
     /// </summary>
     public unsafe void UpdateWallSnapDetection()
     {
@@ -1363,12 +1367,14 @@ namespace HousingUnlocked
 
         var m = BuildMatrix(*((BgPartsLayoutInstance*)inst)->GetTransformImpl());
         var dummy = false;
-        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, territoryLimit, "house wall", ref bestTerr, ref bestTerrName, ref wallTris, ref dummy);
+        // House walls: distance to the attachable face only — no half-space test,
+        // so an item behind the plane (inside the wall) still snaps forward onto it.
+        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, territoryLimit, "house wall", ref bestTerr, ref bestTerrName, ref wallTris, ref dummy, acceptBothSides: true);
       }
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), wall capture {capture:0.###} flat; furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}), territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
+      WallSnapDiagnostic = $"wall mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), wall capture {capture:0.###} flat; furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}), territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
 
       if (furnHit || terrHit)
       {
@@ -1389,14 +1395,14 @@ namespace HousingUnlocked
 
     /// <summary>
     /// Walks a BgPart's collision mesh and, for every wall-flagged triangle
-    /// (bits 20..23 == 1), measures the front-side (normal side) distance from
-    /// each probe point. The back face of a one-sided wall correctly produces
-    /// no warning.
+    /// (bits 20..23 == 1), measures the distance from each probe point.
+    /// House walls are distance-only (either side of the plane). Furniture false
+    /// walls accept the back (anti-normal) side only.
     /// </summary>
     private static unsafe void WalkWallTriangles(
       BgPartsLayoutInstance* bgPart, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      bool acceptBackSide = false)
+      bool acceptBackSide = false, bool acceptBothSides = false)
     {
       var collider = bgPart->Collider;
       if (collider == null || collider->GetColliderType() != ColliderType.Mesh) return;
@@ -1405,13 +1411,13 @@ namespace HousingUnlocked
       var pcb = (MeshPCB*)meshCol->Mesh;
       if (pcb->RootNode == null) return;
 
-      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide);
+      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides);
     }
 
     private static unsafe void WalkNode(
       MeshPCB.FileNode* node, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      HashSet<nint> visited, int depth, bool acceptBackSide)
+      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides)
     {
       if (node == null || depth > 64) return;
       if (!visited.Add((nint)node)) return;
@@ -1464,7 +1470,7 @@ namespace HousingUnlocked
           //    a stage panel facing the room holds wall items on its back; if it
           //    is turned around (snap face toward the wall) nothing attaches.
           var side = Vector3.Dot(n, probe - a);
-          if (acceptBackSide ? side > 0f : side < 0f) continue;
+          if (!acceptBothSides && (acceptBackSide ? side > 0f : side < 0f)) continue;
           var d = DistancePointTriangle(probe, a, b, c);
           if (d < best)
           {
@@ -1474,8 +1480,8 @@ namespace HousingUnlocked
         }
       }
 
-      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide);
-      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide);
+      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides);
+      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides);
     }
 
     /// <summary>Decodes a mesh vertex (raw floats, or compressed ushorts scaled into the node bounds).</summary>

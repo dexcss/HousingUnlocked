@@ -154,22 +154,17 @@ namespace HousingUnlocked.Interface.Components
         }
       }
 
-      // Wall snap warning: wall-mounted items attach onto wall collision surfaces —
-      // including "false walls" (stage panels, partitions) via WallCollisionMesh.
-      if (Configuration.ShowWallSnapWarning && activeItemId != 0)
+      // Wall status for wall-mounted items (shown in rotate mode): GREEN = the item
+      // will attach at this position; RED = nothing within reach. House walls have
+      // one attachable face but snap items forward onto it even from just behind the
+      // plane; furniture false walls attach on their back side.
+      if (Configuration.ShowWallSnapWarning && activeItemId != 0 && (int)Memory.ActiveItemCategory == 15)
       {
         Memory.UpdateWallSnapDetection();
+        var wallName = string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName;
         if (Memory.LastWallSnapHit)
         {
-          var wallName = string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName;
-          if (Memory.LastWallSnapTargetIsTerritory)
-          {
-            ImGui.TextColored(RED, $"\u26A0 WILL SNAP TO WALL: {wallName}");
-          }
-          else
-          {
-            ImGui.TextColored(ORANGE, $"\u26A0 WILL ATTACH TO: {wallName}");
-          }
+          ImGui.TextColored(GREEN, $"\u2713 WILL ATTACH: {wallName}");
           if (ImGui.IsItemHovered())
           {
             ImGui.BeginTooltip();
@@ -180,6 +175,17 @@ namespace HousingUnlocked.Interface.Components
               ImGui.Text("House walls snap the item on DESELECT.");
             else
               ImGui.Text("False-wall furniture attaches when the housing interface closes or you re-enter the house.");
+            ImGui.EndTooltip();
+          }
+        }
+        else
+        {
+          ImGui.TextColored(RED, "\u2717 NO WALL ATTACH");
+          if (ImGui.IsItemHovered())
+          {
+            ImGui.BeginTooltip();
+            ImGui.Text("No wall surface within the flat 1.0 capture of the item pivot.");
+            ImGui.Text("Move toward a wall (or a stage panel's back) until this turns green.");
             ImGui.EndTooltip();
           }
         }
