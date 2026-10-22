@@ -16,6 +16,7 @@ using FFXIVClientStructs.FFXIV.Common.Component.BGCollision;
 using FFXIVClientStructs.FFXIV.Common.Component.BGCollision.Math;
 using CameraManager = FFXIVClientStructs.FFXIV.Client.Game.Control.CameraManager;
 using SphereBounds = FFXIVClientStructs.FFXIV.Common.Math.SphereBounds;
+using AxisAlignedBounds = FFXIVClientStructs.FFXIV.Common.Math.AxisAlignedBounds;
 using ColliderType = FFXIVClientStructs.FFXIV.Common.Component.BGCollision.ColliderType;
 
 namespace HousingUnlocked
@@ -826,20 +827,22 @@ namespace HousingUnlocked
         return;
       }
 
-      // Prefer the engine's own sphere bounds (works for collider-less tabletop
-      // items); fall back to the collider AABB.
+      // The engine's visual AABB is the best proxy for the item's body: available
+      // without colliders, and tighter than the bounding sphere (which can be
+      // inflated by non-visual children). Fall back to the sphere, then colliders.
       Vector3 bbMin, bbMax;
-      var sphereNote = "";
-      if (GetActiveItemSphereBounds(out var sphereCenter, out var sphereRadius))
-      {
-        bbMin = sphereCenter - new Vector3(sphereRadius);
-        bbMax = sphereCenter + new Vector3(sphereRadius);
-        sphereNote = $"sphere r {sphereRadius:0.###}";
-      }
-      else if (GetActiveItemWorldBounds() is { } bounds)
+      var sourceNote = "";
+      if (GetActiveItemWorldBounds() is { } bounds)
       {
         bbMin = bounds.Min;
         bbMax = bounds.Max;
+        sourceNote = "visual AABB";
+      }
+      else if (GetActiveItemSphereBounds(out var sphereCenter, out var sphereRadius))
+      {
+        bbMin = sphereCenter - new Vector3(sphereRadius);
+        bbMax = sphereCenter + new Vector3(sphereRadius);
+        sourceNote = $"sphere r {sphereRadius:0.###}";
       }
       else
       {
@@ -872,7 +875,7 @@ namespace HousingUnlocked
         }
       }
 
-      TableSnapDiagnostic = $"{candidates.Count} TableTop receiver(s), item Y [{bbMin.Y:0.###}..{bbMax.Y:0.###}] pivot {pos.Y:0.###}{(sphereNote.Length > 0 ? ", " + sphereNote : "")}";
+      TableSnapDiagnostic = $"{candidates.Count} TableTop receiver(s), item Y [{bbMin.Y:0.###}..{bbMax.Y:0.###}] pivot {pos.Y:0.###}{(sourceNote.Length > 0 ? ", " + sourceNote : "")}";
 
       if (best != float.PositiveInfinity)
       {
@@ -1477,6 +1480,16 @@ namespace HousingUnlocked
         return null;
 
       var active = HousingStructure->ActiveItem;
+
+      // Preferred: the engine's own axis-aligned visual bounds. Unlike collider AABBs
+      // these exist for collider-less tabletop decorations and match what the engine
+      // itself considers the item's body.
+      var visual = default(AxisAlignedBounds);
+      active->GetAxisAlignedBoundsImpl(&visual);
+      if (visual.Max.X > visual.Min.X && visual.Max.Y > visual.Min.Y && visual.Max.Z > visual.Min.Z)
+        return (visual.Min, visual.Max);
+
+      // Fallback: union of the child collider world bounds.
       var instances = active->Instances.Instances;
       var size = (int)(instances.Last - instances.First);
       Vector3 min = new(float.MaxValue), max = new(float.MinValue);
