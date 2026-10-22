@@ -1250,7 +1250,11 @@ namespace HousingUnlocked
       LastWallSnapThreshold = threshold;
 
       var config = Plugin.GetConfiguration();
-      var limit = threshold + config.SnapThreshold;
+      // Wall-item projection capture: the engine pulls wall items back onto the
+      // wall plane on deselect from FURTHER than the TargetMarker threshold
+      // (measured: projected from 3.25, silent from 5.76) — so the warning limit
+      // is threshold + WallCaptureMargin rather than the floor-snap safety.
+      var limit = threshold + config.WallCaptureMargin;
 
       // Probe points: the item pivot plus every TargetMarker offset, rotated
       // into world space by the item's yaw.
@@ -1378,7 +1382,7 @@ namespace HousingUnlocked
 
         var m = BuildMatrix(*((BgPartsLayoutInstance*)inst)->GetTransformImpl());
         var dummy = false;
-        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, limit, "terrain surface", ref best, ref bestName, ref wallTris, ref dummy);
+        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, limit, "wall/terrain", ref best, ref bestName, ref wallTris, ref dummy);
       }
 
       WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), threshold {threshold:0.###} +safety {config.SnapThreshold:0.###} = {limit:0.###}, probes {probes.Count}";
@@ -1761,6 +1765,32 @@ namespace HousingUnlocked
       {
         var lastIsHousingOpen = _isHousingOpen;
         _isHousingOpen = IsHousingOpen();
+
+        // Housing interface closed: the engine applies DEFERRED snaps here (items
+        // pushed into the floor get pulled onto the floor only when placement mode
+        // ends). Diff the layout snapshot immediately and log every movement.
+        if (lastIsHousingOpen && !_isHousingOpen)
+        {
+          var mgrExit = HousingModule != null ? HousingModule->GetCurrentManager() : null;
+          if (mgrExit != null && mgrExit->Objects != null)
+          {
+            for (var i = 0; i < 600; i++)
+            {
+              var addr = mgrExit->Objects[i];
+              if (addr == 0) continue;
+              var go = (GameObject*)addr;
+              var key = (nint)go->SharedGroupLayoutInstance;
+              var p = go->Position;
+              if (_lastLayoutSnapshot.TryGetValue(key, out var prev))
+              {
+                if (Vector3.Distance(p, prev) > 0.0005f)
+                  SnapLogger.Event("housing_exit_snap",
+                    $"baseId={go->BaseId} before=[{prev.X:0.####},{prev.Y:0.####},{prev.Z:0.####}] after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}]");
+                _lastLayoutSnapshot[key] = p;
+              }
+            }
+          }
+        }
 
         // Deselect detection + post-snap tracking. The engine applies snaps when
         // the item is deselected, so this transition (and where the item lands)

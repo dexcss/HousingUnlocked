@@ -88,7 +88,8 @@ namespace HousingUnlocked.Interface.Components
         if (ImGui.IsItemHovered())
         {
           ImGui.BeginTooltip();
-          ImGui.Text("This item is tagged as floor-snapping. Snap applies when you DESELECT the item.");
+          ImGui.Text("This item is tagged as floor-snapping. Snap applies when you DESELECT the item;");
+          ImGui.Text("pushed-down items may snap only when you exit the housing interface.");
           ImGui.Text($"Vertical direction: {(dir < 0 ? "pushing down" : dir > 0 ? "pulling up" : "stationary")} — snap target follows movement.");
           if (Memory.LastFloorRaycastHit)
             ImGui.Text($"Distance to surface below (terrain included): {Memory.LastFloorRaycastDistance:0.###}");
@@ -169,8 +170,8 @@ namespace HousingUnlocked.Interface.Components
             ImGui.Text($"Surface: {wallName}");
             ImGui.Text($"Distance: {Memory.LastWallSnapDistance:0.###}");
             ImGui.Text($"Wall snap threshold: {Memory.LastWallSnapThreshold:0.###} (+{Configuration.SnapThreshold:0.###} safety)");
-            ImGui.Text("Wall items (skylights, wallboards, etc.) attach to WallCollisionMesh surfaces — including stage panels and other false walls.");
-            ImGui.Text("Snap applies when you DESELECT the item.");
+            ImGui.Text("Wall items are PROJECTED back onto the wall on deselect — capture range is item-dependent.");
+            ImGui.Text("Some snaps are deferred until you exit the housing interface.");
             ImGui.EndTooltip();
           }
         }

@@ -53,6 +53,12 @@ namespace HousingUnlocked
     // stage panels and partitions) is within the item's wall snap threshold.
     public bool ShowWallSnapWarning { get; set; } = true;
 
+    // The engine PROJECTS wall items back onto the wall plane on deselect within
+    // a capture range larger than the TargetMarker threshold (measured in-game:
+    // projected from 3.25 yalms, did not project from 5.76). The warning limit
+    // for wall items is therefore marker threshold + this margin.
+    public float WallCaptureMargin { get; set; } = 2.5f;
+
     public void Save()
     {
       Plugin.PluginInterface.SavePluginConfig(this);
