@@ -110,59 +110,6 @@ namespace HousingUnlocked.Interface.Components
         ImGui.EndTooltip();
       }
 
-      // Green/red glow on the item itself. The game's own orange selection glow is
-      // engine-rendered and cannot be recolored from a plugin, so draw a soft glow
-      // wash over the active item's projected bounds (background draw list: behind UI).
-      if (Memory.HousingStructure != null && Memory.HousingStructure->ActiveItem != null)
-      {
-        var bounds = Memory.GetActiveItemWorldBounds();
-        if (bounds.HasValue)
-        {
-          var bbMin = bounds.Value.Min;
-          var bbMax = bounds.Value.Max;
-          var display = ImGui.GetIO().DisplaySize;
-          var margin = new Vector2(80f, 80f);
-          var lo = new Vector2(-margin.X, -margin.Y);
-          var hi = display + margin;
-          var screenMin = new Vector2(float.MaxValue, float.MaxValue);
-          var screenMax = new Vector2(float.MinValue, float.MinValue);
-          var projections = 0;
-          for (var corner = 0; corner < 8; corner++)
-          {
-            var world = new Vector3(
-              (corner & 1) != 0 ? bbMax.X : bbMin.X,
-              (corner & 2) != 0 ? bbMax.Y : bbMin.Y,
-              (corner & 4) != 0 ? bbMax.Z : bbMin.Z);
-            if (!Plugin.GameGui.WorldToScreen(world, out var screen))
-              continue; // corner behind the camera; keep the ones that project
-            screen = Vector2.Clamp(screen, lo, hi);
-            screenMin = Vector2.Min(screenMin, screen);
-            screenMax = Vector2.Max(screenMax, screen);
-            projections++;
-          }
-
-          if (projections >= 2 && screenMax.X - screenMin.X >= 4f && screenMax.Y - screenMin.Y >= 4f)
-          {
-            var good = snapSummary.Length == 0;
-            var color = good ? new Vector3(.2f, 1f, .2f) : new Vector3(1f, .2f, .2f);
-            var pulse = .8f + .2f * (float)System.Math.Sin(ImGui.GetTime() * 4.0);
-            var drawList = ImGui.GetBackgroundDrawList();
-            drawList.AddRectFilled(screenMin, screenMax,
-              ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, .22f * pulse)), 8f);
-            for (var layer = 3; layer >= 1; layer--)
-            {
-              var grow = layer * 7f;
-              var expand = new Vector2(grow, grow);
-              var alpha = .10f * pulse / layer;
-              drawList.AddRectFilled(screenMin - expand, screenMax + expand,
-                ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, alpha)), 10f + grow);
-            }
-            drawList.AddRect(screenMin, screenMax,
-              ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, .95f * pulse)), 8f, ImDrawFlags.None, 3f);
-          }
-        }
-      }
-
       if (Configuration.ShowSnapWarning && isFloorSnapItem && Memory.ActiveItemMovedSinceSelect)
       {
         if (inSnapZone)
