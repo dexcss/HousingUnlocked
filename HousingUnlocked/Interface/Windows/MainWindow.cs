@@ -1,6 +1,7 @@
 using System;
 using System.Numerics;
 
+using Dalamud.Interface;
 using Dalamud.Interface.Components;
 using Dalamud.Interface.Windowing;
 
@@ -18,7 +19,9 @@ namespace HousingUnlocked.Interface.Windows
     private static PluginMemory Memory => Plugin.GetMemory();
     private static Configuration Configuration => Plugin.GetConfiguration();
 
-    private static readonly Vector4 RedColor = new(1, 0, 0, 1);
+    private static readonly Vector4 Gold = new(.95f, .78f, .35f, 1f);
+    private static readonly Vector4 Red = new(1f, .32f, .32f, 1f);
+    private static readonly Vector4 Muted = new(.62f, .62f, .66f, 1f);
 
     private readonly ItemControls _itemControls = new();
 
@@ -26,6 +29,14 @@ namespace HousingUnlocked.Interface.Windows
 
     public override void PreDraw()
     {
+      // A stable minimum width keeps the window from resizing as the status text
+      // changes — one source of the "flickering" feel while dragging.
+      SizeConstraints = new WindowSizeConstraints
+      {
+        MinimumSize = new Vector2(330, 0),
+        MaximumSize = new Vector2(560, 2000),
+      };
+
       if (!Reset)
         return;
       Reset = false;
@@ -34,128 +45,190 @@ namespace HousingUnlocked.Interface.Windows
 
     public override unsafe void Draw()
     {
-      ImGui.BeginGroup();
+      DrawHeader();
+      ImGui.Separator();
 
+      DrawQuickToggles();
+      ImGui.Separator();
+
+      if (Memory.HousingStructure->Mode == HousingLayoutMode.None)
+        DrawHint("Enter housing mode to get started.");
+      else if (PluginMemory.GamepadMode)
+        DrawHint("Gamepad mode is not supported.");
+      else if (Memory.HousingStructure->ActiveItem == null || Memory.HousingStructure->Mode != HousingLayoutMode.Rotate)
+        DrawHint("Select a housing item in Rotate mode.");
+      else
+        _itemControls.Draw();
+
+      ImGui.Separator();
+      DrawAdvanced();
+      ImGui.Separator();
+      DrawFooter();
+    }
+
+    private static void DrawHeader()
+    {
+      ImGui.TextColored(Gold, "Housing Unlocked");
+      ImGui.SameLine();
+      var version = typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "dev";
+      ImGui.TextDisabled($"v{version}");
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Under active testing — features may behave unexpectedly.");
+    }
+
+    private void DrawQuickToggles()
+    {
       var placeAnywhere = Configuration.PlaceAnywhere;
       if (ImGui.Checkbox("Place Anywhere", ref placeAnywhere))
       {
-        // Set the place anywhere based on the checkbox state.
         PluginMemory.SetPlaceAnywhere(placeAnywhere);
         Configuration.PlaceAnywhere = placeAnywhere;
         Configuration.Save();
       }
-      DrawTooltip("Allows the placement of objects without limitation from the game engine.");
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Place objects without the engine's placement limits.");
 
       ImGui.SameLine();
-
-      // Checkbox is clicked, set the configuration and save.
       var useGizmo = Configuration.UseGizmo;
       if (ImGui.Checkbox("Gizmo", ref useGizmo))
       {
         Configuration.UseGizmo = useGizmo;
         Configuration.Save();
       }
-      DrawTooltip("Displays a movement gizmo on the selected item to allow for in-game movement on all axis.");
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Show a movement gizmo on the selected item.");
 
       ImGui.SameLine();
-
-      // Checkbox is clicked, set the configuration and save.
       var doSnap = Configuration.DoSnap;
       if (ImGui.Checkbox("Snap", ref doSnap))
       {
         Configuration.DoSnap = doSnap;
         Configuration.Save();
       }
-      DrawTooltip("Enables snapping of gizmo movement based on the drag value set below.");
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Snap gizmo movement to the drag grid.");
 
       ImGui.SameLine();
-      if (ImGuiComponents.IconButton(1, gizmo.Mode == ImGuizmoMode.Local ? Dalamud.Interface.FontAwesomeIcon.ArrowsAlt : Dalamud.Interface.FontAwesomeIcon.Globe))
+      if (ImGuiComponents.IconButton(1, gizmo.Mode == ImGuizmoMode.Local ? FontAwesomeIcon.ArrowsAlt : FontAwesomeIcon.Globe))
         gizmo.Mode = gizmo.Mode == ImGuizmoMode.Local ? ImGuizmoMode.World : ImGuizmoMode.Local;
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip($"Gizmo space: {(gizmo.Mode == ImGuizmoMode.Local ? "Local" : "World")}");
+    }
 
-      DrawTooltip(
-      [
-        $"Mode: {(gizmo.Mode == ImGuizmoMode.Local ? "Local" : "World")}",
-        "Changes gizmo mode between local and world movement."
-      ]);
+    private void DrawAdvanced()
+    {
+      if (!ImGui.CollapsingHeader("Advanced"))
+        return;
 
-      ImGui.Separator();
-
-      if (Memory.HousingStructure->Mode == HousingLayoutMode.None)
-        DrawError("Enter housing mode to get started");
-      else if (PluginMemory.GamepadMode)
-        DrawError("Does not support Gamepad");
-      else if (Memory.HousingStructure->ActiveItem == null || Memory.HousingStructure->Mode != HousingLayoutMode.Rotate)
+      var floorWarnings = Configuration.ShowSnapWarning;
+      if (ImGui.Checkbox("Floor snap warnings", ref floorWarnings))
       {
-        DrawError("Select a housing item in Rotate mode");
-        ImGuiComponents.HelpMarker("Are you doing everything right? Try using the /Housing Unlocked Debug command and report this issue in Discord!");
+        Configuration.ShowSnapWarning = floorWarnings;
+        Configuration.Save();
       }
-      else
-        _itemControls.Draw();
 
-      ImGui.Separator();
-
-      // Drag amount for the inputs.
-      var drag = Configuration.Drag;
-      if (ImGui.InputFloat("drag", ref drag, 0.05f))
+      var itemWarnings = Configuration.ShowItemSnapWarning;
+      if (ImGui.Checkbox("Item-to-item warnings", ref itemWarnings))
       {
-        drag = Math.Min(Math.Max(0.001f, drag), 10f);
+        Configuration.ShowItemSnapWarning = itemWarnings;
+        Configuration.Save();
+      }
+
+      var tableWarnings = Configuration.ShowTableSnapWarning;
+      if (ImGui.Checkbox("Table snap warnings", ref tableWarnings))
+      {
+        Configuration.ShowTableSnapWarning = tableWarnings;
+        Configuration.Save();
+      }
+
+      var wallWarnings = Configuration.ShowWallSnapWarning;
+      if (ImGui.Checkbox("Wall snap warnings", ref wallWarnings))
+      {
+        Configuration.ShowWallSnapWarning = wallWarnings;
+        Configuration.Save();
+      }
+
+      ImGui.Spacing();
+      var drag = Configuration.Drag;
+      if (ImGui.InputFloat("Drag step", ref drag, 0.05f))
+      {
+        drag = Math.Clamp(drag, 0.001f, 10f);
         Configuration.Drag = drag;
         Configuration.Save();
       }
-      DrawTooltip("Sets the amount to change when dragging the controls, also influences the gizmo snap feature.");
-
-      var dummyHousingGoods = AtkManager.HousingGoods != null && AtkManager.HousingGoods.IsVisible;
-      var dummyInventory = AtkManager.InventoryVisible;
-
-      if (ImGui.Checkbox("Display in-game list", ref dummyHousingGoods))
-      {
-        AtkManager.ShowFurnishingList(dummyHousingGoods);
-
-        Configuration.DisplayFurnishingList = dummyHousingGoods;
-        Configuration.Save();
-      }
-      ImGui.SameLine();
-
-      if (ImGui.Checkbox("Display inventory", ref dummyInventory))
-      {
-        AtkManager.ShowInventory(dummyInventory);
-
-        Configuration.DisplayInventory = dummyInventory;
-        Configuration.Save();
-      }
-
-      if (ImGui.Button("Open Furnishing List"))
-        Plugin.CommandManager.ProcessCommand("/hu list");
-      DrawTooltip(
-      [
-        "Opens a furnishing list that you can use to sort by distance and click to select objects.",
-        "NOTE: Does not currently work outdoors!"
-      ]);
-
-      ImGui.EndGroup();
-    }
-
-    private static void DrawTooltip(string[] text)
-    {
       if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Coordinate step size and gizmo snap grid.");
+
+      var mode = (int)Configuration.ItemSnapRangeMode;
+      if (ImGui.Combo("Item snap range", ref mode, "Either\0Sum\0Placed\0"))
       {
-        ImGui.BeginTooltip();
-        foreach (var t in text)
-          ImGui.Text(t);
-        ImGui.EndTooltip();
+        Configuration.ItemSnapRangeMode = (ItemSnapRangeMode)mode;
+        Configuration.Save();
       }
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Which item's SphereCastRange drives item-to-item distance.");
+
+      ImGui.Spacing();
+      if (ImGui.Button("Rebuild wall cache"))
+        Memory.InvalidateTerritoryWallCache();
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Re-scan the house walls on the next wall item selection.");
+
+      ImGui.SameLine();
+      if (ImGui.Button("Reset window"))
+        Reset = true;
+
+      ImGui.SameLine();
+      if (ImGui.Button(SnapLogger.Enabled ? "Stop logging" : "Start logging"))
+      {
+        SnapLogger.ManualOverride = true;
+        if (SnapLogger.Enabled)
+          SnapLogger.Stop("/hu menu");
+        else
+          SnapLogger.Start("/hu menu");
+      }
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Writes a JSONL trace to the plugin config folder (for bug reports).");
     }
 
-    private static void DrawTooltip(string text)
+    private void DrawFooter()
     {
-      DrawTooltip([text]);
+      var housingGoods = AtkManager.HousingGoods != null && AtkManager.HousingGoods.IsVisible;
+      var inventory = AtkManager.InventoryVisible;
+
+      if (ImGui.Checkbox("Furnishing list", ref housingGoods))
+      {
+        AtkManager.ShowFurnishingList(housingGoods);
+        Configuration.DisplayFurnishingList = housingGoods;
+        Configuration.Save();
+      }
+
+      ImGui.SameLine();
+      if (ImGui.Checkbox("Inventory", ref inventory))
+      {
+        AtkManager.ShowInventory(inventory);
+        Configuration.DisplayInventory = inventory;
+        Configuration.Save();
+      }
+
+      ImGui.Spacing();
+      if (ImGui.Button("Open furnishing list"))
+        Plugin.CommandManager.ProcessCommand("/hu list");
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Sortable list of placed furnishings — click one to select it.");
+
+      ImGui.SameLine();
+      if (ImGui.Button("Debug"))
+        Plugin.GetUi().Debug.Toggle();
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Raw housing/snap diagnostics.");
     }
 
-    private static void DrawError(string text)
+    private static void DrawHint(string text)
     {
-      ImGui.PushStyleColor(ImGuiCol.Text, RedColor);
-      ImGui.Text(text);
-      ImGui.PopStyleColor();
+      ImGui.Spacing();
+      ImGui.TextColored(Muted, text);
+      ImGui.Spacing();
     }
   }
 }

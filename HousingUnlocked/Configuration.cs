@@ -1,6 +1,5 @@
 using Dalamud.Configuration;
 using System;
-using System.Collections.Generic;
 
 namespace HousingUnlocked
 {
@@ -17,46 +16,23 @@ namespace HousingUnlocked
     public bool DisplayFurnishingList { get; set; } = true;
     public bool DisplayInventory { get; set; } = true;
 
-    // Snap warning settings. Per-item snap distance is computed from each item's
-    // collider footprint using the engine's actual formula. Validation across test
-    // items showed the formula matches real snap to within ~0.06 game units, with
-    // the worst case being Grassy Rug (formula 2.0, real 2.06). Safety margin of
-    // 0.07 ensures the warning covers all observed cases — distance ≤ formula+0.07
-    // catches the snap zone reliably without much false-alarm headroom.
+    // Safety margin for formula-derived floor snap distances. Authored values
+    // (SphereCastRange, wall markers, TargetMarker distances) are exact and never
+    // get the margin — see PluginMemory.GetActiveItemFFXIVId.
     public float SnapThreshold { get; set; } = 0.07f;
+
+    // Warning toggles (also available in the Advanced section of the main window).
     public bool ShowSnapWarning { get; set; } = true;
-
-    // Per-item snap distance overrides, keyed by FFXIV Item RowId. Populated by
-    // /hu learn when the formula's auto-computed value is wrong for a specific
-    // item (typically when the collision mesh has padding that doesn't match the
-    // visual footprint, e.g. Company Chest). When an override is present, it
-    // takes precedence over the auto-computed value.
-    public Dictionary<uint, float> SnapOverrides { get; set; } = new();
-
-    // Item-to-item snap warning. Driven by each item's SphereCastRange override
-    // (sgb type 0x4B, see SnapRangeData): a warning fires when the active item is
-    // within the effective snap range of a placed snap-capable item
-    // (e.g. Stage Panel 0.1, Hanging Bench 0.4, arcade machines 1.0-1.5).
     public bool ShowItemSnapWarning { get; set; } = true;
+    public bool ShowTableSnapWarning { get; set; } = true;
+    public bool ShowWallSnapWarning { get; set; } = true;
 
-    // Which side's SphereCastRange drives the effective item-snap distance:
+    // Which side's SphereCastRange drives the item-to-item snap distance:
     // Either = max(active, placed); Sum = active + placed; PlacedOnly = placed only.
     public ItemSnapRangeMode ItemSnapRangeMode { get; set; } = ItemSnapRangeMode.Either;
 
-    // Table snap warning: fires for tabletop items (ItemUICategory 78) when a
-    // nearby placed item's TableTop collision surface is within snap margin of
-    // the item's pivot — the engine will attach the item onto that surface.
-    public bool ShowTableSnapWarning { get; set; } = true;
-
-    // Wall snap warning: fires for wall-mounted items (HousingItemCategory 15)
-    // when a nearby WallCollisionMesh surface (house-adjacent false walls like
-    // stage panels and partitions) is within the item's wall snap threshold.
-    public bool ShowWallSnapWarning { get; set; } = true;
-
-    // Wall snap capture distance — MEASURED IN-GAME: the imitation skylight
-    // snaps at pivot distance 0.99 from a wall plane and does not snap at 1.00,
-    // for house walls AND furniture false walls alike (flat rule, no per-item
-    // derivation).
+    // Wall capture: flat 1.0 measured in-game for every wall item and every wall
+    // surface. The item's back-ray must reach the surface within this distance.
     public float WallCaptureDistance { get; set; } = 1.0f;
 
     public void Save()

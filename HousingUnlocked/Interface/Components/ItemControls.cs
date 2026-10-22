@@ -1,3 +1,4 @@
+using System;
 using System.Numerics;
 
 using Dalamud.Interface;
@@ -7,12 +8,22 @@ using Dalamud.Bindings.ImGui;
 
 namespace HousingUnlocked.Interface.Components
 {
+  /// <summary>
+  /// Item panel: live snap status, position/rotation controls, copy/paste.
+  /// The status prediction is debounced — while dragging, boundary cases can flip
+  /// between good/snap every frame; only a state that holds is shown.
+  /// </summary>
   public class ItemControls
   {
     private static PluginMemory Memory => Plugin.GetMemory();
     private static Configuration Configuration => Plugin.GetConfiguration();
 
     private static float Drag => Configuration.Drag;
+
+    private static readonly Vector4 Red = new(1f, .32f, .32f, 1f);
+    private static readonly Vector4 Green = new(.35f, 1f, .45f, 1f);
+    private static readonly Vector4 Blue = new(.38f, .58f, 1f, 1f);
+    private static readonly Vector4 Gold = new(.95f, .78f, .35f, 1f);
 
     private float? lockX;
     private float? lockY;
@@ -21,61 +32,51 @@ namespace HousingUnlocked.Interface.Components
     private Vector3? copyPosition;
     private float? copyRotation;
 
-    private Vector4 RED = new(1, .2f, .2f, 1);
-    private Vector4 GREEN = new(.2f, 1, .2f, 1);
-    private Vector4 BLUE = new(.2f, .2f, 1, 1);
-    private Vector4 ORANGE = new(1, .6f, .1f, 1);
+    // Status stabilization (flicker fix).
+    private const double StatusHoldMs = 160;
+    private string _shownSummary = "";
+    private string _pendingSummary = "";
+    private DateTime _pendingSince = DateTime.UtcNow;
+    private nint _statusItem;
 
     public unsafe void Draw()
     {
       if (Memory.HousingStructure->ActiveItem != null)
       {
         Memory.Position = Memory.ReadPosition();
-        // Handle lock logic.
-        if (lockX != null)
-          Memory.Position.X = (float)lockX;
-        if (lockY != null)
-          Memory.Position.Y = (float)lockY;
-        if (lockZ != null)
-          Memory.Position.Z = (float)lockZ;
+        if (lockX != null) Memory.Position.X = lockX.Value;
+        if (lockY != null) Memory.Position.Y = lockY.Value;
+        if (lockZ != null) Memory.Position.Z = lockZ.Value;
         Memory.WritePosition(Memory.Position);
       }
 
-      // Snap-status banner (only shown when there's an item selected and the
-      // setting is enabled). Reflects whether the active item is FloorSnap-tagged
-      // and currently within the per-item snap distance derived from its collider footprint.
       var activeItemId = Memory.GetActiveItemFFXIVId();
       var isFloorSnapItem = activeItemId != 0 && SnapData.HasFloorSnap(activeItemId);
       var floorD = float.PositiveInfinity;
       var ceilD = float.PositiveInfinity;
-      var distanceToFloor = float.PositiveInfinity;
       if (isFloorSnapItem)
       {
-        distanceToFloor = Memory.GetDistanceToFloorBelow();
+        Memory.GetDistanceToFloorBelow();
         floorD = Memory.LastFloorRaycastDistance;
         ceilD = Memory.LastCeilingRaycastDistance;
       }
 
-      // Direction-aware: the engine snaps toward the direction of travel. Pushing
-      // an item down targets the nearest surface BELOW (terrain and rocks included
-      // — the "sunken item, random rock" case); pulling up targets the floor above;
-      // stationary falls back to whichever is closer.
+      // Direction-aware: moving down targets the surface below; moving up targets
+      // the floor above; stationary falls back to whichever is closer.
       var dir = Memory.VerticalMoveDirection;
       var snapsUp = dir > 0 ? true : dir < 0 ? false : ceilD < floorD;
       var directionalDistance = snapsUp ? ceilD : floorD;
 
-      // Authored thresholds (SphereCastRange / wall marker / manual learn) are
-      // EXACT — in-game confirmed: Stage Panel snaps at 0.100, free at 0.101 —
-      // so the safety margin is only added for approximate formula thresholds.
+      // Authored thresholds are exact; the safety margin only applies to
+      // formula-derived values (see PluginMemory).
       var perItemThreshold = Memory.ActiveItemSnapThreshold;
       var effectiveThreshold = perItemThreshold > 0f
         ? perItemThreshold + (Memory.ActiveItemThresholdIsOverride ? 0f : Configuration.SnapThreshold)
         : Configuration.SnapThreshold;
-      var inSnapZone = isFloorSnapItem && Memory.ActiveItemMovedSinceSelect && SnapData.IsInFloorSnapZone(
-        activeItemId, directionalDistance, effectiveThreshold);
+      var inSnapZone = isFloorSnapItem && Memory.ActiveItemMovedSinceSelect &&
+        SnapData.IsInFloorSnapZone(activeItemId, directionalDistance, effectiveThreshold);
 
-      // Gather every snap state once, then show one universal status line for ALL
-      // items: RED = at least one snap will fire at this position, GREEN = none.
+      // Gather every snap state once.
       if (Configuration.ShowItemSnapWarning && activeItemId != 0)
         Memory.UpdateItemSnapDetection();
       if (Configuration.ShowTableSnapWarning && activeItemId != 0)
@@ -83,104 +84,56 @@ namespace HousingUnlocked.Interface.Components
       if (Configuration.ShowWallSnapWarning && activeItemId != 0)
         Memory.UpdateWallSnapDetection();
 
-      var snapSummary = "";
+      var itemName = string.IsNullOrEmpty(Memory.LastItemSnapTargetName)
+        ? SnapRangeData.GetItemName(Memory.LastItemSnapTargetItemId)
+        : Memory.LastItemSnapTargetName;
+      var tableName = string.IsNullOrEmpty(Memory.LastTableSnapTargetName) ? "table" : Memory.LastTableSnapTargetName;
+      var wallName = string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName;
+
+      var summary = "";
       if (inSnapZone)
-        snapSummary = snapsUp ? "floor above" : "floor";
+        summary = snapsUp ? "floor above" : "floor";
       if (Configuration.ShowItemSnapWarning && Memory.LastItemSnapHit)
-        snapSummary += (snapSummary.Length > 0 ? ", " : "") + "item: " +
-          (string.IsNullOrEmpty(Memory.LastItemSnapTargetName)
-            ? SnapRangeData.GetItemName(Memory.LastItemSnapTargetItemId)
-            : Memory.LastItemSnapTargetName);
+        summary += (summary.Length > 0 ? " · " : "") + "item: " + itemName;
       if (Configuration.ShowTableSnapWarning && Memory.LastTableSnapHit)
-        snapSummary += (snapSummary.Length > 0 ? ", " : "") + "table: " +
-          (string.IsNullOrEmpty(Memory.LastTableSnapTargetName) ? "table" : Memory.LastTableSnapTargetName);
+        summary += (summary.Length > 0 ? " · " : "") + "table: " + tableName;
       if (Configuration.ShowWallSnapWarning && Memory.LastWallSnapHit)
-        snapSummary += (snapSummary.Length > 0 ? ", " : "") + "wall: " +
-          (string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName);
+        summary += (summary.Length > 0 ? " · " : "") + "wall: " + wallName;
 
-      if (snapSummary.Length > 0)
-        ImGui.TextColored(RED, $"\u26A0 WILL SNAP \u2014 {snapSummary}");
-      else
-        ImGui.TextColored(GREEN, "\u2713 GOOD \u2014 no snap");
+      var shownSummary = Stabilize(summary, Memory.HousingStructure->ActiveItem != null ? (nint)Memory.HousingStructure->ActiveItem : 0);
 
-      if (ImGui.IsItemHovered())
-      {
-        ImGui.BeginTooltip();
-        if (snapSummary.Length == 0)
-          ImGui.Text("No snap detected; the item stays where it is.");
-        else
-        {
-          if (inSnapZone)
-          {
-            ImGui.Text(snapsUp ? "Floor above: WILL SNAP UPWARD" : "Floor: WILL SNAP TO FLOOR");
-            ImGui.Text($"Vertical direction: {(dir < 0 ? "pushing down" : dir > 0 ? "pulling up" : "stationary")}");
-            if (Memory.LastFloorRaycastHit)
-              ImGui.Text($"Distance to surface below: {Memory.LastFloorRaycastDistance:0.###}");
-            if (Memory.LastCeilingRaycastHit)
-              ImGui.Text($"Distance to floor above: {Memory.LastCeilingRaycastDistance:0.###}");
-            if (perItemThreshold > 0f)
-              ImGui.Text(Memory.ActiveItemThresholdIsOverride
-                ? $"Per-item snap distance: {perItemThreshold:0.###} (authored exact)"
-                : $"Per-item snap distance: {perItemThreshold:0.###} (+{Configuration.SnapThreshold:0.###} safety = {effectiveThreshold:0.###})");
-            ImGui.Text("Snap applies when you DESELECT the item.");
-          }
+      ImGui.Spacing();
+      DrawStatusCard(shownSummary);
 
-          if (Configuration.ShowItemSnapWarning && Memory.LastItemSnapHit)
-          {
-            var snapName = string.IsNullOrEmpty(Memory.LastItemSnapTargetName)
-              ? SnapRangeData.GetItemName(Memory.LastItemSnapTargetItemId)
-              : Memory.LastItemSnapTargetName;
-            ImGui.Text($"Item: {snapName} (item {Memory.LastItemSnapTargetItemId})");
-            ImGui.Text($"  distance {Memory.LastItemSnapDistance:0.###}, range {Memory.LastItemSnapEffectiveRange:0.###} (+{Configuration.SnapThreshold:0.###} safety)");
-            ImGui.Text("  Snap applies when you DESELECT the item.");
-          }
+      ImGui.Spacing();
+      ImGui.TextColored(Gold, "POSITION");
+      ImGui.Separator();
 
-          if (Configuration.ShowTableSnapWarning && Memory.LastTableSnapHit)
-          {
-            var tableName = string.IsNullOrEmpty(Memory.LastTableSnapTargetName) ? "table" : Memory.LastTableSnapTargetName;
-            ImGui.Text($"Table: {tableName} (surface Y {Memory.LastTableSnapSurfaceY:0.###}, pivot \u0394Y {Memory.LastTableSnapDeltaY:0.###})");
-            ImGui.Text("  Snap applies when you DESELECT the item.");
-          }
+      DrawPositionRow("X", ref Memory.Position.X, ref lockX, Red);
+      DrawPositionRow("Y", ref Memory.Position.Y, ref lockY, Green, inSnapZone);
+      DrawPositionRow("Z", ref Memory.Position.Z, ref lockZ, Blue);
+      DrawRotationRow();
 
-          if (Configuration.ShowWallSnapWarning && Memory.LastWallSnapHit)
-          {
-            var wallName = string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName;
-            ImGui.Text($"Wall: {wallName} at {Memory.LastWallSnapDistance:0.###} (capture {Memory.LastWallSnapThreshold:0.###})");
-            ImGui.Text(Memory.LastWallSnapTargetIsTerritory
-              ? "  House wall: snaps the item on DESELECT."
-              : "  False wall: attaches when the housing interface closes.");
-          }
-        }
-        ImGui.EndTooltip();
-      }
-
-      // Copy / Paste buttons for position & rotation (icon + text).
+      ImGui.Spacing();
       if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Copy, "Copy"))
       {
         copyPosition = Memory.Position;
         copyRotation = Memory.Rotation.Y;
       }
       if (ImGui.IsItemHovered())
-        ImGui.SetTooltip("Copy Position & Rotation");
+        ImGui.SetTooltip("Copy position & rotation");
 
       ImGui.SameLine();
 
       ImGui.BeginDisabled(copyPosition == null || copyRotation == null);
+      if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Paste, "Paste") && copyPosition != null && copyRotation != null)
       {
-        if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Paste, "Paste") && copyPosition != null && copyRotation != null)
-        {
-          Memory.WritePosition(copyPosition.Value);
-          Memory.WriteRotation(Memory.Rotation with { Y = copyRotation.Value });
-        }
-        if (ImGui.IsItemHovered())
-          ImGui.SetTooltip("Paste Position & Rotation");
+        Memory.WritePosition(copyPosition.Value);
+        Memory.WriteRotation(Memory.Rotation with { Y = copyRotation.Value });
       }
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Paste position & rotation");
       ImGui.EndDisabled();
-
-      DrawInputCoord("x coord##hu-x", ref Memory.Position.X, ref lockX, RED);
-      DrawInputCoord("y coord##hu-y", ref Memory.Position.Y, ref lockY, GREEN, inSnapZone);
-      DrawInputCoord("z coord##hu-z", ref Memory.Position.Z, ref lockZ, BLUE);
-      DrawInputRotate("ry degree##hu-ry", ref Memory.Rotation.Y);
 
       // In-game ground-truth capture (see SnapLogger): session runs while the
       // window is open; /hu mark labels snap moments inside the trace.
@@ -202,60 +155,151 @@ namespace HousingUnlocked.Interface.Components
       }
     }
 
-    private void HandleScrollInput(ref float f)
+    /// <summary>Only switches the displayed state after the new one holds briefly.</summary>
+    private string Stabilize(string raw, nint item)
     {
-      if (ImGui.IsMouseHoveringRect(ImGui.GetItemRectMin(), ImGui.GetItemRectMax()))
+      var now = DateTime.UtcNow;
+      if (item != _statusItem)
       {
-        var delta = ImGui.GetIO().MouseWheel * Drag;
-        if (delta != 0)
-        {
-          f += delta;
-          Memory.WritePosition(Memory.Position);
-        }
+        _statusItem = item;
+        _shownSummary = raw;
+        _pendingSummary = raw;
+        _pendingSince = now;
+        return raw;
       }
+
+      if (raw == _shownSummary)
+      {
+        _pendingSummary = raw;
+        return _shownSummary;
+      }
+
+      if (raw != _pendingSummary)
+      {
+        _pendingSummary = raw;
+        _pendingSince = now;
+        return _shownSummary;
+      }
+
+      if ((now - _pendingSince).TotalMilliseconds >= StatusHoldMs)
+        _shownSummary = raw;
+      return _shownSummary;
     }
 
-    private bool DrawInput(string name, ref float f)
+    private void DrawStatusCard(string summary)
     {
-      var changed = ImGui.InputFloat(name, ref f, Drag);
-      HandleScrollInput(ref f);
-      ImGui.SameLine();
-      return changed;
+      var good = summary.Length == 0;
+      var color = good ? Green : Red;
+      var text = good ? "GOOD \u2014 no snap" : "WILL SNAP \u2014 " + summary;
+      if (text.Length > 58)
+        text = text[..55] + "\u2026";
+
+      var scale = ImGui.GetIO().FontGlobalScale;
+      var pad = 9f * scale;
+      var width = ImGui.GetContentRegionAvail().X;
+      var height = ImGui.CalcTextSize(text).Y + pad * 2f;
+      var p = ImGui.GetCursorScreenPos();
+
+      ImGui.InvisibleButton("##hu-status", new Vector2(width, height));
+      var hovered = ImGui.IsItemHovered();
+
+      var dl = ImGui.GetWindowDrawList();
+      var bg = good ? new Vector4(.10f, .28f, .14f, .55f) : new Vector4(.36f, .10f, .10f, .60f);
+      var max = p + new Vector2(width, height);
+      dl.AddRectFilled(p, max, ImGui.GetColorU32(bg), 6f * scale);
+      dl.AddRect(p, max, ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, .8f)), 6f * scale, ImDrawFlags.None, 1.5f * scale);
+      dl.AddCircleFilled(p + new Vector2(pad + 5f * scale, height / 2f), 4.5f * scale, ImGui.GetColorU32(color));
+      dl.AddText(p + new Vector2(pad + 16f * scale, pad), ImGui.GetColorU32(color), text);
+
+      if (hovered)
+        DrawStatusTooltip(shownSummary: summary);
+
+      ImGui.SetCursorScreenPos(new Vector2(p.X, p.Y + height + 6f * scale));
     }
 
-    private void DrawInputCoord(string name, ref float f)
+    private void DrawStatusTooltip(string shownSummary)
     {
-      if (DrawInput(name, ref f))
-        Memory.WritePosition(Memory.Position);
+      ImGui.BeginTooltip();
+      if (shownSummary.Length == 0)
+      {
+        ImGui.Text("No snap detected — the item stays where it is.");
+      }
+      else
+      {
+        if (Memory.LastFloorRaycastHit)
+          ImGui.Text($"Surface below: {Memory.LastFloorRaycastDistance:0.###}");
+        if (Memory.LastCeilingRaycastHit)
+          ImGui.Text($"Floor above: {Memory.LastCeilingRaycastDistance:0.###}");
+        if (Memory.ActiveItemSnapThreshold > 0f)
+          ImGui.Text(Memory.ActiveItemThresholdIsOverride
+            ? $"Per-item snap distance: {Memory.ActiveItemSnapThreshold:0.###} (authored exact)"
+            : $"Per-item snap distance: {Memory.ActiveItemSnapThreshold:0.###} (+{Configuration.SnapThreshold:0.###} safety)");
+
+        if (Configuration.ShowItemSnapWarning && Memory.LastItemSnapHit)
+        {
+          var itemName = string.IsNullOrEmpty(Memory.LastItemSnapTargetName)
+            ? SnapRangeData.GetItemName(Memory.LastItemSnapTargetItemId)
+            : Memory.LastItemSnapTargetName;
+          ImGui.Text($"Item: {itemName} — {Memory.LastItemSnapDistance:0.###} away (range {Memory.LastItemSnapEffectiveRange:0.###})");
+        }
+        if (Configuration.ShowTableSnapWarning && Memory.LastTableSnapHit)
+          ImGui.Text($"Table: {Memory.LastTableSnapTargetName} — surface Y {Memory.LastTableSnapSurfaceY:0.###}");
+        if (Configuration.ShowWallSnapWarning && Memory.LastWallSnapHit)
+        {
+          ImGui.Text($"Wall: {Memory.LastWallSnapTargetName} — ray {Memory.LastWallSnapDistance:0.###} (capture {Memory.LastWallSnapThreshold:0.###})");
+          ImGui.Text(Memory.LastWallSnapTargetIsTerritory
+            ? "House wall: snaps on deselect."
+            : "False wall: attaches when the housing interface closes.");
+        }
+        ImGui.TextDisabled("Snap applies when you deselect.");
+      }
+      ImGui.EndTooltip();
     }
 
-    private void DrawInputRotate(string name, ref float f)
+    private void DrawPositionRow(string label, ref float value, ref float? locked, Vector4 color, bool warn = false)
     {
-      if (DrawInput(name, ref f))
-        Memory.WriteRotation(Memory.Rotation);
-    }
+      var scale = ImGui.GetIO().FontGlobalScale;
+      ImGui.TextColored(color, label);
+      ImGui.SameLine(30f * scale);
+      ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 34f * ImGui.GetIO().FontGlobalScale);
 
-    static void DrawCircle(Vector4 color)
-    {
-      ImGui.SameLine();
-      var pos = ImGui.GetCursorScreenPos();
-      var center = pos.Y + ImGui.GetTextLineHeight() / 2f + 3f;
-      ImGui.GetWindowDrawList().AddCircleFilled(new Vector2(pos.X + 12, center), 8, ImGui.GetColorU32(color));
-      ImGui.Dummy(new Vector2(24, 24));
-    }
-
-    private void DrawInputCoord(string name, ref float f, ref float? locked, Vector4 color, bool warnSnap = false)
-    {
-      // Tint the input frame red when this coord is in the floor-snap danger zone.
-      if (warnSnap)
-        ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(0.5f, 0.1f, 0.1f, 1f));
-      DrawInputCoord(name, ref f);
-      if (warnSnap)
+      if (warn)
+        ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(.45f, .12f, .12f, 1f));
+      var changed = ImGui.InputFloat($"##hu-{label}", ref value, Drag, 0f, "%.4f");
+      if (warn)
         ImGui.PopStyleColor();
 
-      if (ImGuiComponents.IconButton((int)ImGui.GetID(name), locked == null ? FontAwesomeIcon.Unlock : FontAwesomeIcon.Lock))
-        locked = locked == null ? f : null;
-      DrawCircle(color);
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Mouse wheel adjusts by the drag amount.");
+      var wheelMoved = false;
+      if (ImGui.IsMouseHoveringRect(ImGui.GetItemRectMin(), ImGui.GetItemRectMax()))
+      {
+        var wheel = ImGui.GetIO().MouseWheel * Drag;
+        if (wheel != 0f)
+        {
+          value += wheel;
+          wheelMoved = true;
+        }
+      }
+      if (changed || wheelMoved)
+        Memory.WritePosition(Memory.Position);
+
+      ImGui.SameLine();
+      if (ImGuiComponents.IconButton((int)ImGui.GetID(label), locked == null ? FontAwesomeIcon.Unlock : FontAwesomeIcon.Lock))
+        locked = locked == null ? value : null;
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip(locked == null ? "Lock this axis" : "Unlock this axis");
+    }
+
+    private void DrawRotationRow()
+    {
+      ImGui.TextColored(Gold, "RY");
+      ImGui.SameLine(30f * ImGui.GetIO().FontGlobalScale);
+      ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 34f * ImGui.GetIO().FontGlobalScale);
+      if (ImGui.InputFloat("##hu-ry", ref Memory.Rotation.Y, Drag, 0f, "%.1f"))
+        Memory.WriteRotation(Memory.Rotation);
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Rotation in degrees.");
     }
   }
 }

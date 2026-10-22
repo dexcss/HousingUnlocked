@@ -57,7 +57,7 @@ namespace HousingUnlocked
 
       CommandManager.AddHandler(commandName, new CommandInfo(OnCommand)
       {
-        HelpMessage = "Opens the controls for Housing Unlocked.\n/hu autoopen → toggles auto-open when entering housing mode.\n/hu threshold <value> → safety margin added to per-item snap distance (default 0.07).\n/hu learn → records the active item's current floor distance as its snap-distance override.\n/hu unlearn → removes the snap-distance override for the active item.\n/hu itemsnap → toggles the item-to-item snap warning (SphereCastRange data).\n/hu itemsnapmode <either|sum|placed> → which side's snap range drives item-to-item distance.\n/hu tablesnap → toggles the table snap warning (TableTop surfaces).\n/hu wallsnap → toggles the wall snap warning (false-wall surfaces).\n/hu wallsrefresh → rebuilds the house-wall surface cache.\n/hu log → toggles the snap session logger.\n/hu mark <note> → labels this moment in the log (use it the instant something snaps).\n/hu logpath → shows where session logs are saved."
+        HelpMessage = "Opens the controls for Housing Unlocked.\n/hu autoopen → toggles auto-open when entering housing mode.\n/hu threshold <value> → safety margin for formula-derived snap distances (default 0.07).\n/hu itemsnap → toggles the item-to-item snap warning.\n/hu itemsnapmode <either|sum|placed> → which side's snap range drives item-to-item distance.\n/hu tablesnap → toggles the table snap warning.\n/hu wallsnap → toggles the wall snap warning.\n/hu wallsrefresh → rebuilds the house-wall surface cache.\n/hu log → toggles the snap session logger.\n/hu mark <note> → labels this moment in the log.\n/hu logpath → shows where session logs are saved."
       });
 
       // Set the ImGui context 
@@ -238,50 +238,6 @@ namespace HousingUnlocked
             var p = _memory.Position;
             SnapLogger.Mark("snap", p.X, p.Y, p.Z);
             Chat.Print("[HU] Marked: snap");
-          }
-
-          if (opt.Equals("learn"))
-          {
-            var itemId = _memory.GetActiveItemFFXIVId();
-            if (itemId == 0)
-            {
-              Chat.PrintError("[HU] No item selected (or item ID couldn't be resolved).");
-            }
-            else if (!_memory.LastFloorRaycastHit)
-            {
-              Chat.PrintError("[HU] No floor surface detected below the item — can't learn.");
-            }
-            else
-            {
-              // Record the item's current distance-to-floor as its snap threshold.
-              // The user is expected to position the item at the precise edge of
-              // the snap zone (lowest stable Y) before running this.
-              var measured = _memory.LastFloorRaycastDistance;
-              _configuration.SnapOverrides[itemId] = measured;
-              _configuration.Save();
-              // Force re-capture next frame by invalidating the cache.
-              _memory.InvalidateActiveItemCache();
-              Chat.Print($"[HU] Snap distance for item {itemId} recorded as {measured:0.###}.");
-            }
-          }
-
-          if (opt.Equals("unlearn"))
-          {
-            var itemId = _memory.GetActiveItemFFXIVId();
-            if (itemId == 0)
-            {
-              Chat.PrintError("[HU] No item selected.");
-            }
-            else if (!_configuration.SnapOverrides.Remove(itemId))
-            {
-              Chat.Print($"[HU] No snap override was stored for item {itemId}.");
-            }
-            else
-            {
-              _configuration.Save();
-              _memory.InvalidateActiveItemCache();
-              Chat.Print($"[HU] Removed snap override for item {itemId}.");
-            }
           }
         }
 

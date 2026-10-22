@@ -199,139 +199,11 @@ namespace HousingUnlocked
 
     /// <summary>
     /// True when ActiveItemSnapThreshold comes from authored engine data
-    /// (SphereCastRange override, wall TargetMarker distance, or a manual
-    /// /hu learn measurement). Authored values are EXACT — the safety margin
-    /// must not be added. False = formula-derived (approximate, margin applies).
+    /// (SphereCastRange override or wall TargetMarker distance). Authored values
+    /// are EXACT — the safety margin must not be added. False = formula-derived
+    /// (approximate, margin applies).
     /// </summary>
     public bool ActiveItemThresholdIsOverride { get; private set; } = false;
-
-    /// <summary>
-    /// Forces the next call to <see cref="GetActiveItemFFXIVId"/> to re-read the
-    /// active item's data even if the underlying pointer hasn't changed. Used
-    /// after editing per-item config (overrides) so the cached threshold picks
-    /// up the new value without requiring the user to deselect and reselect.
-    /// </summary>
-    public unsafe void InvalidateActiveItemCache()
-    {
-      _cachedActiveItemPtr = null;
-    }
-
-    /// <summary>
-    /// Dumps undocumented and potentially-relevant fields from the active item's
-    /// first BgPart child, looking for per-item data that would tell us the
-    /// engine's actual snap distance. Wired up to the debug window — purely for
-    /// reverse-engineering, no production behavior depends on this.
-    /// </summary>
-    public unsafe void DumpRawSnapHuntFields()
-    {
-      if (HousingStructure == null || HousingStructure->ActiveItem == null)
-      {
-        Dalamud.Bindings.ImGui.ImGui.Text("(no active item)");
-        return;
-      }
-      var active = HousingStructure->ActiveItem;
-      var instances = active->Instances.Instances;
-      var size = (int)(instances.Last - instances.First);
-      if (size == 0)
-      {
-        Dalamud.Bindings.ImGui.ImGui.Text("(no children)");
-        return;
-      }
-
-      Dalamud.Bindings.ImGui.ImGui.Text($"ActiveItem (SharedGroup) addr: 0x{(ulong)active:X16}, {size} children");
-      Dalamud.Bindings.ImGui.ImGui.Text($"Item position: ({active->Transform.Translation.X:0.###}, {active->Transform.Translation.Y:0.###}, {active->Transform.Translation.Z:0.###})");
-      // Y rotation in degrees (from quaternion). Useful for understanding the
-      // item's facing — and so which direction its snap face points.
-      var rot = active->Transform.Rotation;
-      // Extract Y rotation from quaternion (yaw).
-      var yaw = System.Math.Atan2(2.0f * (rot.W * rot.Y + rot.X * rot.Z), 1.0f - 2.0f * (rot.Y * rot.Y + rot.X * rot.X));
-      Dalamud.Bindings.ImGui.ImGui.Text($"Item Y rotation: {yaw * 180.0 / System.Math.PI:0.##}°");
-      Dalamud.Bindings.ImGui.ImGui.Separator();
-
-      // Walk ALL BgPart children and dump material+geometry info for each.
-      // Goal: find which children have snap-receptive material flags and which
-      // child's geometry shape would identify a "back face" for wall snap.
-      for (int i = 0; i < size; i++)
-      {
-        var childPtr = instances.First[i];
-        if (childPtr.Value == null) continue;
-        var ci = childPtr.Value->Instance;
-        if (ci == null) continue;
-        if (ci->Id.Type != InstanceType.BgPart) continue;
-
-        var bgPart = (BgPartsLayoutInstance*)ci;
-        var collider = bgPart->Collider;
-
-        Dalamud.Bindings.ImGui.ImGui.TextColored(new Vector4(0.7f, 0.9f, 1f, 1f), $"--- Child[{i}] ---");
-
-        // Material flags — the key piece. Per the Re:MakePlace dev's table:
-        //   digit 3 (mask 0x00100000) = 1 → WallCollisionMesh
-        //   digit 4 (mask 0x00010000) = 1 → FloorTop, 8 → TableTop, 9 → RugTop
-        //   digit 5 (mask 0x00001000) = 2/3/6/7 → various PlayerCollision flavors
-        ulong matLow = bgPart->CollisionMaterialIdLow;
-        ulong matHigh = bgPart->CollisionMaterialIdHigh;
-        ulong matMaskLow = bgPart->CollisionMaterialMaskLow;
-        ulong matMaskHigh = bgPart->CollisionMaterialMaskHigh;
-        // Combine to a 64-bit value for easy nibble inspection.
-        ulong material = (matHigh << 32) | matLow;
-        Dalamud.Bindings.ImGui.ImGui.Text($"  Material: 0x{material:X16} (mask 0x{(matMaskHigh << 32) | matMaskLow:X16})");
-
-        // Decode the nibbles per RMP dev's table.
-        // Reading hex digits left-to-right in the 8-digit (32-bit) low display:
-        //   digit 1 → bits 28..31
-        //   digit 2 → bits 24..27
-        //   digit 3 → bits 20..23 (WallCollisionMesh when =1)
-        //   digit 4 → bits 16..19 (FloorTop=1, TableTop=8, RugTop=9)
-        //   digit 5 → bits 12..15 (PlayerCollision flavors)
-        //   digit 6 → bits 8..11
-        //   digit 7 → bits 4..7  (sound type)
-        //   digit 8 → bits 0..3  (sound type)
-        int d3 = (int)((matLow >> 20) & 0xF);
-        int d4 = (int)((matLow >> 16) & 0xF);
-        int d5 = (int)((matLow >> 12) & 0xF);
-        var labels = new System.Collections.Generic.List<string>();
-        if (d3 == 1) labels.Add("WallCollisionMesh");
-        if (d4 == 1) labels.Add("FloorTop");
-        if (d4 == 8) labels.Add("TableTop");
-        if (d4 == 9) labels.Add("RugTop");
-        if (d5 == 2) labels.Add("PlayerCol");
-        if (d5 == 3) labels.Add("PlayerCol+CamCol");
-        if (d5 == 6) labels.Add("PlayerCol(?)");
-        if (d5 == 7) labels.Add("PlayerCol+CamCol+CursorCol");
-        Dalamud.Bindings.ImGui.ImGui.Text($"    Decoded flags: {(labels.Count > 0 ? string.Join(", ", labels) : "(none of known flags)")}");
-
-        if (collider == null)
-        {
-          Dalamud.Bindings.ImGui.ImGui.Text("  No collider");
-          continue;
-        }
-
-        // Collider type and bounding info.
-        var colliderType = collider->GetColliderType();
-        Dalamud.Bindings.ImGui.ImGui.Text($"  Collider type: {colliderType}");
-
-        if (colliderType == ColliderType.Mesh)
-        {
-          var meshCol = (ColliderMesh*)collider;
-          var mesh = meshCol->Mesh;
-          if (mesh != null)
-          {
-            var meshPCB = (MeshPCB*)mesh;
-            var rootNode = meshPCB->RootNode;
-            if (rootNode != null)
-            {
-              var lb = rootNode->LocalBounds;
-              Dalamud.Bindings.ImGui.ImGui.Text($"  LocalBounds: {lb.Max.X - lb.Min.X:0.###} x {lb.Max.Y - lb.Min.Y:0.###} x {lb.Max.Z - lb.Min.Z:0.###}  (center: ({(lb.Min.X+lb.Max.X)/2:0.##}, {(lb.Min.Y+lb.Max.Y)/2:0.##}, {(lb.Min.Z+lb.Max.Z)/2:0.##}))");
-            }
-          }
-        }
-        else if (colliderType == ColliderType.Box || colliderType == ColliderType.Cylinder || colliderType == ColliderType.Sphere || colliderType == ColliderType.Plane)
-        {
-          var scale = *(Vector3*)((byte*)collider + 0xD8);
-          Dalamud.Bindings.ImGui.ImGui.Text($"  {colliderType}.Scale: ({scale.X:0.###}, {scale.Y:0.###}, {scale.Z:0.###})");
-        }
-      }
-    }
 
     // Last table-snap detection results (tabletop item snapping onto a TableTop surface).
     public bool LastTableSnapHit { get; private set; } = false;
@@ -1706,27 +1578,17 @@ namespace HousingUnlocked
         break;
       }
 
-      // Now that we know the item ID, capture the snap threshold. Priority:
-      // 1. Manual override (/hu learn) — user-measured, always wins.
-      // 2. SphereCastRange override read at runtime (sgb type 0x4B -> Cast.X).
-      // 3. Embedded .sgb table fallback (instance children may not be streamed in).
-      // 4. Wall items: authored TargetMarker distance.
-      // 5. Regular snap: shortest-edge / 2 from the collider footprint.
+      // Capture the snap threshold. Priority:
+      // 1. SphereCastRange override read at runtime (sgb type 0x4B -> Cast.X).
+      // 2. Embedded .sgb table fallback (instance children may not be streamed in).
+      // 3. Wall items: authored TargetMarker distance.
+      // 4. Regular snap: shortest-edge / 2 from the collider footprint.
       //
-      // Authored values (1-4) are EXACT — in-game confirmed: the Stage Panel's
+      // Authored values (1-3) are EXACT � in-game confirmed: the Stage Panel's
       // authored 0.1 snaps at 0.100 and is free at 0.101, so the safety margin
-      // must NOT be added to them. Only the approximate formula (5) gets the
-      // user's safety margin (the formula can underestimate, e.g. Grassy Rug).
-      var config = Plugin.GetConfiguration();
-      if (_cachedActiveItemId != 0 && config.SnapOverrides.TryGetValue(_cachedActiveItemId, out var overridden))
-      {
-        ActiveItemSnapThreshold = overridden;
-        ActiveItemThresholdIsOverride = true;
-        SnapThresholdDiagnostic = $"override (manual /hu learn) -> {overridden:0.###}";
-      }
-      else
-      {
-        var runtimeRange = GetSphereCastRangeOverride(active);
+      // must NOT be added to them. Only the approximate formula (4) gets the
+      // safety margin (it can underestimate, e.g. Grassy Rug).
+      {        var runtimeRange = GetSphereCastRangeOverride(active);
         if (runtimeRange.HasValue)
         {
           ActiveItemSnapThreshold = runtimeRange.Value;

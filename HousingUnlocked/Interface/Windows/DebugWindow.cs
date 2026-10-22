@@ -60,14 +60,6 @@ namespace HousingUnlocked.Interface.Windows
             ImGui.Text($"Per-item snap threshold: {(perItem > 0f ? perItem.ToString("0.######") : "(unavailable)")}  +safety {safety:0.###}  = effective {effective:0.###}");
             ImGui.Text($"Threshold source: {Memory.SnapThresholdDiagnostic}");
             ImGui.Text($"In snap zone: {SnapData.IsInFloorSnapZone(itemId, dist, effective)}");
-
-            // Raw field dump — looking for per-item snap data we don't yet understand.
-            // Dumps undocumented fields and anything else that might correlate with the
-            // engine's actual snap distance for this item. Drop this once we identify
-            // which (if any) field we're after.
-            ImGui.Separator();
-            ImGui.Text("--- Raw fields (hunting for snap data) ---");
-            Memory.DumpRawSnapHuntFields();
           }
 
           // Snap model: regular edge/2, SphereCastRange override, table snap.
