@@ -856,11 +856,11 @@ namespace HousingUnlocked
       //   glass   min XZ 0.097 -> snapped at 0.041/0.050 -> floor ~0.055
       //   bag     min XZ 0.196 -> snaps at 0.079, floats at 0.085
       //   basket  min XZ 0.933 -> snaps at 0.350, floats at 0.439
-      // reach = max(0.055, 0.4 * min(width, depth) + 0.005)
+      // reach = max(0.05, 0.4 * min(width, depth) + 0.002)
       var footprint = System.Math.Min(bbMax.X - bbMin.X, bbMax.Z - bbMin.Z);
       var reach = ActiveItemSnapThreshold > 0f
         ? ActiveItemSnapThreshold
-        : System.Math.Max(0.055f, footprint * 0.4f + 0.005f);
+        : System.Math.Max(0.05f, footprint * 0.4f + 0.002f);
 
       var candidates = GetNearbyTableSurfaces();
       float best = float.PositiveInfinity;
@@ -1261,19 +1261,39 @@ namespace HousingUnlocked
 
         // Embedded-census fallback: known wall receiver, but no wall triangles were
         // readable at runtime — fall back to a two-sided union-AABB check.
-        if (!hadWallTris && SnapRangeData.IsWallReceiver(cached.ItemId))
+        if (SnapRangeData.IsWallReceiver(cached.ItemId))
         {
-          usedAabbFallback = true;
           var union = GetItemColliderUnion(group);
           if (union.HasValue)
           {
+            var bb = union.Value;
+            // Sunk inside the receiver (e.g. pushed through a thin partition): the
+            // engine pushes the item back out to a face. From inside there is no
+            // forward ray hit, so detect containment directly.
             foreach (var p in probes)
             {
-              var d = DistancePointToAABB(p, union.Value);
-              if (d < bestFurn)
+              if (p.X >= bb.Min.X && p.X <= bb.Max.X &&
+                  p.Y >= bb.Min.Y && p.Y <= bb.Max.Y &&
+                  p.Z >= bb.Min.Z && p.Z <= bb.Max.Z)
               {
-                bestFurn = d;
+                bestFurn = 0f;
                 bestFurnName = cached.Name;
+                break;
+              }
+            }
+            // Embedded-census fallback: known receiver with no readable wall
+            // triangles - use the union AABB distance (two-sided).
+            if (!hadWallTris)
+            {
+              usedAabbFallback = true;
+              foreach (var p in probes)
+              {
+                var d = DistancePointToAABB(p, bb);
+                if (d < bestFurn)
+                {
+                  bestFurn = d;
+                  bestFurnName = cached.Name;
+                }
               }
             }
           }
