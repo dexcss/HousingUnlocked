@@ -1503,7 +1503,7 @@ namespace HousingUnlocked
           var v = Vector3.Dot(backDir, qvec) * invDet;
           if (v < 0f || u + v > 1f) continue;
           var t = Vector3.Dot(e2, qvec) * invDet;
-          if (t < 0f || t > limit) continue;
+          if (t < 0.02f || t > limit) continue; // 0 = pivot already on the surface (nothing to snap)
           if (t < best)
           {
             best = t;
