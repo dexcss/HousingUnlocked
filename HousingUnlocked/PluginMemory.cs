@@ -852,12 +852,12 @@ namespace HousingUnlocked
 
       // The engine allows a small gap above the tabletop, scaled by the item's
       // footprint. Calibrated against every in-game observation (Used Banquet Table):
-      //   glass   min XZ 0.097 -> snap at 0.034, no at 0.132  => reach ~0.036
-      //   bag     min XZ 0.196 -> snap at 0.055, no at 0.085  => reach ~0.074
-      //   basket  min XZ 0.933 -> snap at 0.125, no at 0.439  => reach ~0.350
-      // => reach = 0.375 * min(width, depth)  (0.75 * the half-extent).
+      //   glass   min XZ 0.097 -> snap at 0.037, no at 0.132  => reach ~0.039
+      //   bag     min XZ 0.196 -> snap at 0.074, no at 0.085  => reach ~0.078
+      //   basket  min XZ 0.933 -> snap at 0.350, no at 0.439  => reach ~0.373
+      // => reach = 0.4 * min(width, depth).
       var footprint = System.Math.Min(bbMax.X - bbMin.X, bbMax.Z - bbMin.Z);
-      var reach = ActiveItemSnapThreshold > 0f ? ActiveItemSnapThreshold : System.Math.Max(0.02f, footprint * 0.375f);
+      var reach = ActiveItemSnapThreshold > 0f ? ActiveItemSnapThreshold : System.Math.Max(0.02f, footprint * 0.4f);
 
       var candidates = GetNearbyTableSurfaces();
       float best = float.PositiveInfinity;
