@@ -102,113 +102,56 @@ namespace HousingUnlocked.Interface.Components
         ImGui.TextColored(RED, $"\u26A0 WILL SNAP \u2014 {snapSummary}");
       else
         ImGui.TextColored(GREEN, "\u2713 GOOD \u2014 no snap");
+
       if (ImGui.IsItemHovered())
       {
         ImGui.BeginTooltip();
-        ImGui.Text("RED = a snap will fire at this position.");
-        ImGui.Text("GREEN = no snap detected; the item stays where it is.");
-        ImGui.EndTooltip();
-      }
-
-      if (Configuration.ShowSnapWarning && isFloorSnapItem && Memory.ActiveItemMovedSinceSelect)
-      {
-        if (inSnapZone)
-        {
-          // Determine which direction the snap will fire (movement direction, or
-          // whichever surface is closer when stationary).
-          ImGui.TextColored(RED, snapsUp ? "\u26A0 WILL SNAP UPWARD" : "\u26A0 WILL SNAP TO FLOOR");
-        }
+        if (snapSummary.Length == 0)
+          ImGui.Text("No snap detected; the item stays where it is.");
         else
-          ImGui.TextColored(GREEN, "\u2713 Floating safely");
-        if (ImGui.IsItemHovered())
         {
-          ImGui.BeginTooltip();
-          ImGui.Text("This item is tagged as floor-snapping. Snap applies when you DESELECT the item;");
-          ImGui.Text("pushed-down items may snap only when you exit the housing interface.");
-          ImGui.Text($"Vertical direction: {(dir < 0 ? "pushing down" : dir > 0 ? "pulling up" : "stationary")} — snap target follows movement.");
-          if (Memory.LastFloorRaycastHit)
-            ImGui.Text($"Distance to surface below (terrain included): {Memory.LastFloorRaycastDistance:0.###}");
-          else
-            ImGui.Text("No surface detected below the item (open air).");
-          if (Memory.LastCeilingRaycastHit)
-            ImGui.Text($"Distance to floor above: {Memory.LastCeilingRaycastDistance:0.###}");
-          else
-            ImGui.Text("No surface detected above the item (open air).");
-          if (perItemThreshold > 0f)
-            ImGui.Text(Memory.ActiveItemThresholdIsOverride ? $"Per-item snap distance: {perItemThreshold:0.###} (authored exact)" : $"Per-item snap distance: {perItemThreshold:0.###}  (+{Configuration.SnapThreshold:0.###} safety = {effectiveThreshold:0.###})");
-          else
-            ImGui.Text($"Per-item snap distance unavailable, using fallback {Configuration.SnapThreshold:0.###}.");
-          ImGui.Text("Adjust safety margin with: /hu threshold <value>");
-          ImGui.EndTooltip();
-        }
-      }
-
-      // Item-to-item snap warning: fires when the active item is within the
-      // SphereCastRange-derived snap distance of a placed snap-capable item
-      // (each item's authored 0x4B override — see SnapRangeData).
-      if (Configuration.ShowItemSnapWarning && activeItemId != 0)
-      {
-        if (Memory.LastItemSnapHit)
-        {
-          var snapName = string.IsNullOrEmpty(Memory.LastItemSnapTargetName)
-            ? SnapRangeData.GetItemName(Memory.LastItemSnapTargetItemId)
-            : Memory.LastItemSnapTargetName;
-          ImGui.TextColored(RED, $"\u26A0 WILL SNAP TO ITEM: {snapName}");
-          if (ImGui.IsItemHovered())
+          if (inSnapZone)
           {
-            ImGui.BeginTooltip();
-            ImGui.Text($"Target: {snapName} (item {Memory.LastItemSnapTargetItemId})");
-            ImGui.Text($"Distance: {Memory.LastItemSnapDistance:0.###}");
-            ImGui.Text($"Effective snap range: {Memory.LastItemSnapEffectiveRange:0.###} (+{Configuration.SnapThreshold:0.###} safety)");
-            ImGui.Text($"Range mode: {Configuration.ItemSnapRangeMode} — change with /hu itemsnapmode <either|sum|placed>");
-            ImGui.Text("Ranges come from each item's SphereCastRange (0x4B) sgb block.");
+            ImGui.Text(snapsUp ? "Floor above: WILL SNAP UPWARD" : "Floor: WILL SNAP TO FLOOR");
+            ImGui.Text($"Vertical direction: {(dir < 0 ? "pushing down" : dir > 0 ? "pulling up" : "stationary")}");
+            if (Memory.LastFloorRaycastHit)
+              ImGui.Text($"Distance to surface below: {Memory.LastFloorRaycastDistance:0.###}");
+            if (Memory.LastCeilingRaycastHit)
+              ImGui.Text($"Distance to floor above: {Memory.LastCeilingRaycastDistance:0.###}");
+            if (perItemThreshold > 0f)
+              ImGui.Text(Memory.ActiveItemThresholdIsOverride
+                ? $"Per-item snap distance: {perItemThreshold:0.###} (authored exact)"
+                : $"Per-item snap distance: {perItemThreshold:0.###} (+{Configuration.SnapThreshold:0.###} safety = {effectiveThreshold:0.###})");
             ImGui.Text("Snap applies when you DESELECT the item.");
-            ImGui.EndTooltip();
+          }
+
+          if (Configuration.ShowItemSnapWarning && Memory.LastItemSnapHit)
+          {
+            var snapName = string.IsNullOrEmpty(Memory.LastItemSnapTargetName)
+              ? SnapRangeData.GetItemName(Memory.LastItemSnapTargetItemId)
+              : Memory.LastItemSnapTargetName;
+            ImGui.Text($"Item: {snapName} (item {Memory.LastItemSnapTargetItemId})");
+            ImGui.Text($"  distance {Memory.LastItemSnapDistance:0.###}, range {Memory.LastItemSnapEffectiveRange:0.###} (+{Configuration.SnapThreshold:0.###} safety)");
+            ImGui.Text("  Snap applies when you DESELECT the item.");
+          }
+
+          if (Configuration.ShowTableSnapWarning && Memory.LastTableSnapHit)
+          {
+            var tableName = string.IsNullOrEmpty(Memory.LastTableSnapTargetName) ? "table" : Memory.LastTableSnapTargetName;
+            ImGui.Text($"Table: {tableName} (surface Y {Memory.LastTableSnapSurfaceY:0.###}, pivot \u0394Y {Memory.LastTableSnapDeltaY:0.###})");
+            ImGui.Text("  Snap applies when you DESELECT the item.");
+          }
+
+          if (Configuration.ShowWallSnapWarning && Memory.LastWallSnapHit)
+          {
+            var wallName = string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName;
+            ImGui.Text($"Wall: {wallName} at {Memory.LastWallSnapDistance:0.###} (capture {Memory.LastWallSnapThreshold:0.###})");
+            ImGui.Text(Memory.LastWallSnapTargetIsTerritory
+              ? "  House wall: snaps the item on DESELECT."
+              : "  False wall: attaches when the housing interface closes.");
           }
         }
-      }
-
-      // Table snap warning: tabletop items (ItemUICategory 78) attach onto the
-      // TableTop collision surfaces of nearby placed furniture.
-      if (Configuration.ShowTableSnapWarning && activeItemId != 0)
-      {
-        if (Memory.LastTableSnapHit)
-        {
-          var tableName = string.IsNullOrEmpty(Memory.LastTableSnapTargetName) ? "table" : Memory.LastTableSnapTargetName;
-          ImGui.TextColored(RED, $"\u26A0 WILL SNAP TO TABLE: {tableName}");
-          if (ImGui.IsItemHovered())
-          {
-            ImGui.BeginTooltip();
-            ImGui.Text($"Surface: {tableName}");
-            ImGui.Text($"Surface Y: {Memory.LastTableSnapSurfaceY:0.###} (item pivot \u0394Y {Memory.LastTableSnapDeltaY:0.###})");
-            ImGui.Text("Tabletop items attach to TableTop collision surfaces when close.");
-            ImGui.Text("Snap applies when you DESELECT the item.");
-            ImGui.EndTooltip();
-          }
-        }
-      }
-
-      // Wall snap detail (the universal status above handles green/red): house walls
-      // have one attachable face but snap items forward onto it even from just behind
-      // the plane; furniture false walls attach on their back side.
-      if (Configuration.ShowWallSnapWarning && activeItemId != 0 && (int)Memory.ActiveItemCategory == 15 && Memory.LastWallSnapHit)
-      {
-        var wallName = string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName;
-        ImGui.TextColored(RED, Memory.LastWallSnapTargetIsTerritory
-          ? $"\u26A0 WILL SNAP TO WALL: {wallName}"
-          : $"\u26A0 WILL ATTACH TO: {wallName}");
-        if (ImGui.IsItemHovered())
-        {
-          ImGui.BeginTooltip();
-          ImGui.Text($"Surface: {wallName}");
-          ImGui.Text($"Distance: {Memory.LastWallSnapDistance:0.###}");
-          ImGui.Text($"Wall snap distance: {Memory.LastWallSnapThreshold:0.###} (measured flat rule)");
-          if (Memory.LastWallSnapTargetIsTerritory)
-            ImGui.Text("House walls snap the item on DESELECT.");
-          else
-            ImGui.Text("False-wall furniture attaches when the housing interface closes or you re-enter the house.");
-          ImGui.EndTooltip();
-        }
+        ImGui.EndTooltip();
       }
 
       // Copy / Paste buttons for position & rotation (icon + text).
