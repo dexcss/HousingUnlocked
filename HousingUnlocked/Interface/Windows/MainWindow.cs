@@ -48,6 +48,7 @@ namespace HousingUnlocked.Interface.Windows
     public override unsafe void Draw()
     {
       DrawQuickToggles();
+      DrawDragStep();
       ImGui.Separator();
 
       if (Memory.HousingStructure->Mode == HousingLayoutMode.None)
@@ -61,6 +62,21 @@ namespace HousingUnlocked.Interface.Windows
 
       ImGui.Separator();
       DrawFooter();
+    }
+
+    private static void DrawDragStep()
+    {
+      ImGui.TextDisabled("Drag");
+      ImGui.SameLine();
+      ImGui.SetNextItemWidth(120f * ImGui.GetIO().FontGlobalScale);
+      var drag = Configuration.Drag;
+      if (ImGui.InputFloat("##hu-drag", ref drag, 0.01f, 0f, "%.3f"))
+      {
+        Configuration.Drag = Math.Clamp(drag, 0.001f, 10f);
+        Configuration.Save();
+      }
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Step for the +/- buttons, mouse wheel, and gizmo snap.");
     }
 
     private void DrawQuickToggles()
@@ -138,16 +154,6 @@ namespace HousingUnlocked.Interface.Windows
       }
 
       ImGui.Spacing();
-      var drag = Configuration.Drag;
-      if (ImGui.InputFloat("Drag step", ref drag, 0.05f))
-      {
-        drag = Math.Clamp(drag, 0.001f, 10f);
-        Configuration.Drag = drag;
-        Configuration.Save();
-      }
-      if (ImGui.IsItemHovered())
-        ImGui.SetTooltip("Coordinate step size and gizmo snap grid.");
-
       var mode = (int)Configuration.ItemSnapRangeMode;
       if (ImGui.Combo("Item snap range", ref mode, "Either\0Sum\0Placed\0"))
       {
