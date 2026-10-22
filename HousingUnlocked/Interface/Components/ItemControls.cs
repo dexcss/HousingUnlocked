@@ -71,7 +71,7 @@ namespace HousingUnlocked.Interface.Components
       var effectiveThreshold = perItemThreshold > 0f
         ? perItemThreshold + (Memory.ActiveItemThresholdIsOverride ? 0f : Configuration.SnapThreshold)
         : Configuration.SnapThreshold;
-      var inSnapZone = isFloorSnapItem && SnapData.IsInFloorSnapZone(
+      var inSnapZone = isFloorSnapItem && Memory.ActiveItemMovedSinceSelect && SnapData.IsInFloorSnapZone(
         activeItemId, directionalDistance, effectiveThreshold);
 
       // Gather every snap state once, then show one universal status line for ALL
@@ -110,7 +110,50 @@ namespace HousingUnlocked.Interface.Components
         ImGui.EndTooltip();
       }
 
-      if (Configuration.ShowSnapWarning && isFloorSnapItem)
+      // The item itself glows: draw a green/red highlight over the active item's
+      // projected world bounds. GREEN = good (no snap), RED = a snap will fire.
+      // (The game's own orange selection glow is engine-side and cannot be recolored.)
+      if (Memory.HousingStructure != null && Memory.HousingStructure->ActiveItem != null)
+      {
+        var bounds = Memory.GetActiveItemWorldBounds();
+        if (bounds.HasValue)
+        {
+          var bbMin = bounds.Value.Min;
+          var bbMax = bounds.Value.Max;
+          var projected = true;
+          var screenMin = new Vector2(float.MaxValue, float.MaxValue);
+          var screenMax = new Vector2(float.MinValue, float.MinValue);
+          for (var corner = 0; corner < 8; corner++)
+          {
+            var world = new Vector3(
+              (corner & 1) != 0 ? bbMax.X : bbMin.X,
+              (corner & 2) != 0 ? bbMax.Y : bbMin.Y,
+              (corner & 4) != 0 ? bbMax.Z : bbMin.Z);
+            if (!Plugin.GameGui.WorldToScreen(world, out var screen))
+            {
+              projected = false;
+              break;
+            }
+            screenMin = Vector2.Min(screenMin, screen);
+            screenMax = Vector2.Max(screenMax, screen);
+          }
+
+          if (projected && screenMax.X > screenMin.X && screenMax.Y > screenMin.Y)
+          {
+            var good = snapSummary.Length == 0;
+            var lineColor = good ? new Vector4(.2f, 1f, .2f, 1f) : new Vector4(1f, .2f, .2f, 1f);
+            var fillColor = new Vector4(lineColor.X, lineColor.Y, lineColor.Z, .10f);
+            var pad = new Vector2(6f, 6f);
+            var topLeft = screenMin - pad;
+            var bottomRight = screenMax + pad;
+            var drawList = ImGui.GetForegroundDrawList();
+            drawList.AddRectFilled(topLeft, bottomRight, ImGui.GetColorU32(fillColor), 8f);
+            drawList.AddRect(topLeft, bottomRight, ImGui.GetColorU32(lineColor), 8f, ImDrawFlags.None, 3f);
+          }
+        }
+      }
+
+      if (Configuration.ShowSnapWarning && isFloorSnapItem && Memory.ActiveItemMovedSinceSelect)
       {
         if (inSnapZone)
         {

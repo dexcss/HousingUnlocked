@@ -419,6 +419,15 @@ namespace HousingUnlocked
     private int _postSnapFrames;
     private int _postSnapStable;
 
+    // Movement-since-selection: a freshly selected item that has not been moved is
+    // already placed — its floor snap warning is noise (e.g. a stage panel sitting
+    // on the floor). Any movement re-enables the warnings until reselection.
+    private Vector3 _activeItemSelectPos;
+    private nint _activeItemSelectGroup;
+
+    /// <summary>True once the active item has been moved since it was selected.</summary>
+    public bool ActiveItemMovedSinceSelect { get; private set; }
+
     // ==== Layout drift watch ====
     // Catches the "snaps when you re-instance" behavior: every 2 seconds the
     // positions of all placed items are compared against the previous snapshot;
@@ -1545,6 +1554,34 @@ namespace HousingUnlocked
       return Vector3.Distance(p, a + ab * v2 + ac * w2);
     }
 
+    /// <summary>World-space union bounds of the active item's child colliders, or null.</summary>
+    public unsafe (Vector3 Min, Vector3 Max)? GetActiveItemWorldBounds()
+    {
+      if (HousingStructure == null || HousingStructure->ActiveItem == null)
+        return null;
+
+      var active = HousingStructure->ActiveItem;
+      var instances = active->Instances.Instances;
+      var size = (int)(instances.Last - instances.First);
+      Vector3 min = new(float.MaxValue), max = new(float.MinValue);
+      var any = false;
+      for (int i = 0; i < size; i++)
+      {
+        var childPtr = instances.First[i];
+        if (childPtr.Value == null) continue;
+        var ci = childPtr.Value->Instance;
+        if (ci == null || ci->Id.Type != InstanceType.BgPart) continue;
+        var bgPart = (BgPartsLayoutInstance*)ci;
+        if (bgPart->Collider == null) continue;
+        AABB bb = default;
+        bgPart->Collider->GetWorldBB(&bb);
+        min = Vector3.Min(min, new Vector3(bb.Min.X, bb.Min.Y, bb.Min.Z));
+        max = Vector3.Max(max, new Vector3(bb.Max.X, bb.Max.Y, bb.Max.Z));
+        any = true;
+      }
+      return any ? (min, max) : null;
+    }
+
     /// <summary>Union AABB of all BgPart collider world bounds for a placed item (embedded fallback).</summary>
     private static unsafe AABB? GetItemColliderUnion(SharedGroupLayoutInstance* group)
     {
@@ -1816,9 +1853,22 @@ namespace HousingUnlocked
           var ai = hsTrack->ActiveItem;
           if (ai != null)
           {
+            var activePos = ai->Transform.Translation;
+            if (!_hadActiveItem || _activeItemSelectGroup != (nint)ai)
+            {
+              // New selection: remember where the item started.
+              _activeItemSelectGroup = (nint)ai;
+              _activeItemSelectPos = activePos;
+              ActiveItemMovedSinceSelect = false;
+            }
+            else if (Vector3.Distance(activePos, _activeItemSelectPos) > 0.0005f)
+            {
+              ActiveItemMovedSinceSelect = true;
+            }
+
             _hadActiveItem = true;
             _lastActiveGroup = (nint)ai;
-            _lastActiveGroupPos = ai->Transform.Translation;
+            _lastActiveGroupPos = activePos;
             _postSnapFrames = 0;
           }
           else if (_hadActiveItem)
