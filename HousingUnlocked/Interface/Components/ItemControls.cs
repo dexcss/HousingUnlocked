@@ -265,7 +265,7 @@ namespace HousingUnlocked.Interface.Components
 
       if (warn)
         ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(.45f, .12f, .12f, 1f));
-      var changed = ImGui.InputFloat($"##hu-{label}", ref value, Drag, 0f, "%.4f");
+      var changed = ImGui.InputFloat($"##hu-{label}", ref value, 0f, 0f, "%.4f");
       if (warn)
         ImGui.PopStyleColor();
 
@@ -296,7 +296,7 @@ namespace HousingUnlocked.Interface.Components
       ImGui.TextColored(Gold, "RY");
       ImGui.SameLine(30f * ImGui.GetIO().FontGlobalScale);
       ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 34f * ImGui.GetIO().FontGlobalScale);
-      if (ImGui.InputFloat("##hu-ry", ref Memory.Rotation.Y, Drag, 0f, "%.1f"))
+      if (ImGui.InputFloat("##hu-ry", ref Memory.Rotation.Y, 0f, 0f, "%.1f"))
         Memory.WriteRotation(Memory.Rotation);
       if (ImGui.IsItemHovered())
         ImGui.SetTooltip("Rotation in degrees.");

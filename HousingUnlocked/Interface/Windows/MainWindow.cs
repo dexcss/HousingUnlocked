@@ -25,6 +25,8 @@ namespace HousingUnlocked.Interface.Windows
 
     private readonly ItemControls _itemControls = new();
 
+    private bool _showSettings;
+
     public bool Reset;
 
     public override void PreDraw()
@@ -45,9 +47,6 @@ namespace HousingUnlocked.Interface.Windows
 
     public override unsafe void Draw()
     {
-      DrawHeader();
-      ImGui.Separator();
-
       DrawQuickToggles();
       ImGui.Separator();
 
@@ -61,19 +60,7 @@ namespace HousingUnlocked.Interface.Windows
         _itemControls.Draw();
 
       ImGui.Separator();
-      DrawAdvanced();
-      ImGui.Separator();
       DrawFooter();
-    }
-
-    private static void DrawHeader()
-    {
-      ImGui.TextColored(Gold, "Housing Unlocked");
-      ImGui.SameLine();
-      var version = typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "dev";
-      ImGui.TextDisabled($"v{version}");
-      if (ImGui.IsItemHovered())
-        ImGui.SetTooltip("Under active testing — features may behave unexpectedly.");
     }
 
     private void DrawQuickToggles()
@@ -115,10 +102,12 @@ namespace HousingUnlocked.Interface.Windows
         ImGui.SetTooltip($"Gizmo space: {(gizmo.Mode == ImGuizmoMode.Local ? "Local" : "World")}");
     }
 
-    private void DrawAdvanced()
+    private void DrawSettings()
     {
-      if (!ImGui.CollapsingHeader("Advanced"))
-        return;
+      var version = typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "dev";
+      ImGui.TextColored(Gold, "SETTINGS");
+      ImGui.SameLine();
+      ImGui.TextDisabled($"v{version}");
 
       var floorWarnings = Configuration.ShowSnapWarning;
       if (ImGui.Checkbox("Floor snap warnings", ref floorWarnings))
@@ -189,6 +178,8 @@ namespace HousingUnlocked.Interface.Windows
       }
       if (ImGui.IsItemHovered())
         ImGui.SetTooltip("Writes a JSONL trace to the plugin config folder (for bug reports).");
+
+      ImGui.TextDisabled("Debug window: /hu debug");
     }
 
     private void DrawFooter()
@@ -218,10 +209,14 @@ namespace HousingUnlocked.Interface.Windows
         ImGui.SetTooltip("Sortable list of placed furnishings — click one to select it.");
 
       ImGui.SameLine();
-      if (ImGui.Button("Debug"))
-        Plugin.GetUi().Debug.Toggle();
-      if (ImGui.IsItemHovered())
-        ImGui.SetTooltip("Raw housing/snap diagnostics.");
+      if (ImGui.Button(_showSettings ? "Close settings" : "Settings"))
+        _showSettings = !_showSettings;
+
+      if (_showSettings)
+      {
+        ImGui.Separator();
+        DrawSettings();
+      }
     }
 
     private static void DrawHint(string text)
