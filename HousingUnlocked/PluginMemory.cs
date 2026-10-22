@@ -826,18 +826,26 @@ namespace HousingUnlocked
         return;
       }
 
-      // The engine re-seats a tabletop item only when its body intersects the
-      // TableTop surface on commit. Measured: three items floated at the same pivot
-      // height above a Used Banquet Table — only the one whose collider crossed the
-      // surface snapped when the house reloaded. So test AABB overlap, not pivot
-      // distance.
-      var bounds = GetActiveItemWorldBounds();
-      if (!bounds.HasValue)
+      // Prefer the engine's own sphere bounds (works for collider-less tabletop
+      // items); fall back to the collider AABB.
+      Vector3 bbMin, bbMax;
+      var sphereNote = "";
+      if (GetActiveItemSphereBounds(out var sphereCenter, out var sphereRadius))
+      {
+        bbMin = sphereCenter - new Vector3(sphereRadius);
+        bbMax = sphereCenter + new Vector3(sphereRadius);
+        sphereNote = $"sphere r {sphereRadius:0.###}";
+      }
+      else if (GetActiveItemWorldBounds() is { } bounds)
+      {
+        bbMin = bounds.Min;
+        bbMax = bounds.Max;
+      }
+      else
       {
         TableSnapDiagnostic = "active item bounds unavailable";
         return;
       }
-      var bb = bounds.Value;
 
       var candidates = GetNearbyTableSurfaces();
       float best = float.PositiveInfinity;
@@ -848,12 +856,12 @@ namespace HousingUnlocked
         var surfaceY = t.BB.Max.Y;
 
         // The item must be horizontally over the table…
-        var overX = bb.Min.X <= t.BB.Max.X && bb.Max.X >= t.BB.Min.X;
-        var overZ = bb.Min.Z <= t.BB.Max.Z && bb.Max.Z >= t.BB.Min.Z;
+        var overX = bbMin.X <= t.BB.Max.X && bbMax.X >= t.BB.Min.X;
+        var overZ = bbMin.Z <= t.BB.Max.Z && bbMax.Z >= t.BB.Min.Z;
         if (!overX || !overZ) continue;
 
         // …and its body must cross the tabletop plane (bottom below, top above).
-        if (bb.Min.Y > surfaceY || bb.Max.Y < surfaceY) continue;
+        if (bbMin.Y > surfaceY || bbMax.Y < surfaceY) continue;
 
         var dy = System.Math.Abs(surfaceY - pos.Y);
         if (dy < best)
@@ -864,7 +872,7 @@ namespace HousingUnlocked
         }
       }
 
-      TableSnapDiagnostic = $"{candidates.Count} TableTop receiver(s), item Y [{bb.Min.Y:0.###}..{bb.Max.Y:0.###}] pivot {pos.Y:0.###}";
+      TableSnapDiagnostic = $"{candidates.Count} TableTop receiver(s), item Y [{bbMin.Y:0.###}..{bbMax.Y:0.###}] pivot {pos.Y:0.###}{(sphereNote.Length > 0 ? ", " + sphereNote : "")}";
 
       if (best != float.PositiveInfinity)
       {
@@ -1488,6 +1496,25 @@ namespace HousingUnlocked
         any = true;
       }
       return any ? (min, max) : null;
+    }
+
+    /// <summary>
+    /// The engine's own world-space bounds for the active item. Works for items
+    /// without colliders (small tabletop furnishings), where collider AABBs are
+    /// unavailable. Returns false when the bounds are degenerate.
+    /// </summary>
+    public unsafe bool GetActiveItemSphereBounds(out Vector3 center, out float radius)
+    {
+      center = default;
+      radius = 0f;
+      if (HousingStructure == null || HousingStructure->ActiveItem == null)
+        return false;
+
+      var sb = default(SphereBounds);
+      HousingStructure->ActiveItem->GetSphereBounds(&sb);
+      center = sb.CenterPoint;
+      radius = sb.Radius;
+      return radius > 0.0001f;
     }
 
     /// <summary>Union AABB of all BgPart collider world bounds for a placed item (embedded fallback).</summary>
