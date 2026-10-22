@@ -348,6 +348,11 @@ namespace HousingUnlocked
     public float LastWallSnapThreshold { get; private set; } = 0f;
     public string WallSnapDiagnostic { get; private set; } = "(not computed)";
 
+    // True when the wall target is the house's own territory walls (snap applies
+    // on deselect); false when it is a furniture false wall (attachment is
+    // deferred to housing-interface exit / re-instance).
+    public bool LastWallSnapTargetIsTerritory { get; private set; } = false;
+
     // Last raycast result for the active item (for diagnostics).
     public float LastFloorRaycastDistance { get; private set; } = float.PositiveInfinity;
     public bool LastFloorRaycastHit { get; private set; } = false;
@@ -1220,6 +1225,7 @@ namespace HousingUnlocked
       LastWallSnapTargetName = "";
       LastWallSnapDistance = float.PositiveInfinity;
       LastWallSnapThreshold = 0f;
+      LastWallSnapTargetIsTerritory = false;
 
       if (HousingStructure == null || HousingStructure->ActiveItem == null ||
           HousingModule == null || HousingModule->GetCurrentManager() == null ||
@@ -1336,6 +1342,7 @@ namespace HousingUnlocked
       string bestName = "";
       int wallTris = 0;
       var usedAabbFallback = false;
+      var bestIsTerritory = false;
 
       for (var i = 0; i < 600; i++)
       {
@@ -1414,8 +1421,9 @@ namespace HousingUnlocked
       }
 
       // Static territory walls (the house's own walls): cached once per zone and
-      // measured with the same one-sided triangle test as furniture. This is what
-      // makes wall items warn near REAL walls, not just furniture false walls.
+      // measured with the same one-sided triangle test as furniture. Territory
+      // walls grab wall items on DESELECT (measured 3.25).
+      var bestBeforeTerritory = best;
       EnsureTerritoryWallCache(allowDeep: false);
       if (_territoryWallCache.Count == 0)
         EnsureTerritoryWallCache(allowDeep: true);
@@ -1433,6 +1441,7 @@ namespace HousingUnlocked
         var dummy = false;
         WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, limit, "wall/terrain", ref best, ref bestName, ref wallTris, ref dummy);
       }
+      if (best < bestBeforeTerritory) bestIsTerritory = true;
 
       WallSnapDiagnostic = $"one-sided mesh check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture = {wallBaseSrc} {wallBase:0.####} +eps {config.WallCaptureMargin:0.##} = {limit:0.###}, pivot probe";
 
@@ -1441,6 +1450,7 @@ namespace HousingUnlocked
         LastWallSnapHit = true;
         LastWallSnapDistance = best;
         LastWallSnapTargetName = bestName;
+        LastWallSnapTargetIsTerritory = bestIsTerritory;
       }
     }
 

@@ -162,15 +162,24 @@ namespace HousingUnlocked.Interface.Components
         if (Memory.LastWallSnapHit)
         {
           var wallName = string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName;
-          ImGui.TextColored(RED, $"\u26A0 WILL SNAP TO WALL: {wallName}");
+          if (Memory.LastWallSnapTargetIsTerritory)
+          {
+            ImGui.TextColored(RED, $"\u26A0 WILL SNAP TO WALL: {wallName}");
+          }
+          else
+          {
+            ImGui.TextColored(ORANGE, $"\u26A0 WILL ATTACH TO: {wallName}");
+          }
           if (ImGui.IsItemHovered())
           {
             ImGui.BeginTooltip();
             ImGui.Text($"Surface: {wallName}");
             ImGui.Text($"Distance: {Memory.LastWallSnapDistance:0.###}");
-            ImGui.Text($"Wall snap threshold: {Memory.LastWallSnapThreshold:0.###} (+{Configuration.SnapThreshold:0.###} safety)");
-            ImGui.Text("Wall items are PROJECTED back onto the wall on deselect — capture range is item-dependent.");
-            ImGui.Text("Some snaps are deferred until you exit the housing interface.");
+            ImGui.Text($"Wall snap threshold: {Memory.LastWallSnapThreshold:0.###} (+{Configuration.WallCaptureMargin:0.##} epsilon)");
+            if (Memory.LastWallSnapTargetIsTerritory)
+              ImGui.Text("House walls snap the item on DESELECT.");
+            else
+              ImGui.Text("False-wall furniture attaches when the housing interface closes or you re-enter the house.");
             ImGui.EndTooltip();
           }
         }
@@ -218,7 +227,7 @@ namespace HousingUnlocked.Interface.Components
           isFloorSnapItem, Memory.LastFloorRaycastHit, floorD, Memory.LastCeilingRaycastHit, ceilD,
           perItemThreshold, effectiveThreshold, inSnapZone, snapsUp,
           Memory.LastItemSnapHit, Memory.LastItemSnapTargetName, Memory.LastItemSnapDistance, Memory.LastItemSnapEffectiveRange,
-          Memory.LastWallSnapHit, Memory.LastWallSnapTargetName, Memory.LastWallSnapDistance, Memory.LastWallSnapThreshold, Memory.WallSnapDiagnostic,
+          Memory.LastWallSnapHit, Memory.LastWallSnapTargetName, Memory.LastWallSnapDistance, Memory.LastWallSnapThreshold, Memory.LastWallSnapTargetIsTerritory, Memory.WallSnapDiagnostic,
           Memory.LastTableSnapHit, Memory.LastTableSnapTargetName, Memory.LastTableSnapDeltaY, Memory.TableSnapDiagnostic,
           Memory.SnapThresholdDiagnostic, Memory.ItemSnapDiagnostic);
       }

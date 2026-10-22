@@ -93,13 +93,13 @@ namespace HousingUnlocked
       bool isFloorSnap, bool floorHit, float floorD, bool ceilHit, float ceilD,
       float perItemThreshold, float effThreshold, bool inSnapZone, bool snapsUp,
       bool itemHit, string itemName, float itemD, float itemRange,
-      bool wallHit, string wallName, float wallD, float wallThr, string wallDiag,
+      bool wallHit, string wallName, float wallD, float wallThr, bool wallTerritory, string wallDiag,
       bool tableHit, string tableName, float tableDy, string tableDiag,
       string scrDiag, string itemSnapDiag)
     {
       if (_writer == null) return;
 
-      var sig = $"{R(px)}|{R(py)}|{R(pz)}|{R(yaw)}|{dir}|{inSnapZone}|{snapsUp}|{itemHit}|{R(itemD)}|{wallHit}|{R(wallD)}|{tableHit}|{R(tableDy)}|{state}|{R(perItemThreshold)}";
+      var sig = $"{R(px)}|{R(py)}|{R(pz)}|{R(yaw)}|{dir}|{inSnapZone}|{snapsUp}|{itemHit}|{R(itemD)}|{wallHit}|{R(wallD)}|{wallTerritory}|{tableHit}|{R(tableDy)}|{state}|{R(perItemThreshold)}";
       var now = DateTime.Now;
       var stale = (now - _lastFrameWrite).TotalMilliseconds > 250;
       if (sig == _lastSig && !stale) return;
@@ -113,7 +113,7 @@ namespace HousingUnlocked
         $"\"floorSnap\":{(isFloorSnap ? 1 : 0)},\"floorHit\":{(floorHit ? 1 : 0)},\"floorD\":{Jn(floorD)},\"ceilHit\":{(ceilHit ? 1 : 0)},\"ceilD\":{Jn(ceilD)}," +
         $"\"thr\":{R(perItemThreshold)},\"eff\":{R(effThreshold)},\"inZone\":{(inSnapZone ? 1 : 0)},\"snapUp\":{(snapsUp ? 1 : 0)}," +
         $"\"itemHit\":{(itemHit ? 1 : 0)},\"itemTarget\":\"{Esc(itemName)}\",\"itemD\":{Jn(itemD)},\"itemRange\":{Jn(itemRange)}," +
-        $"\"wallHit\":{(wallHit ? 1 : 0)},\"wallTarget\":\"{Esc(wallName)}\",\"wallD\":{Jn(wallD)},\"wallThr\":{R(wallThr)},\"wallDiag\":\"{Esc(wallDiag)}\"," +
+        $"\"wallHit\":{(wallHit ? 1 : 0)},\"wallTarget\":\"{Esc(wallName)}\",\"wallD\":{Jn(wallD)},\"wallThr\":{R(wallThr)},\"wallTerritory\":{(wallTerritory ? 1 : 0)},\"wallDiag\":\"{Esc(wallDiag)}\"," +
         $"\"tableHit\":{(tableHit ? 1 : 0)},\"tableTarget\":\"{Esc(tableName)}\",\"tableDy\":{Jn(tableDy)},\"tableDiag\":\"{Esc(tableDiag)}\"," +
         $"\"thrSrc\":\"{Esc(scrDiag)}\",\"itemDiag\":\"{Esc(itemSnapDiag)}\"");
     }
