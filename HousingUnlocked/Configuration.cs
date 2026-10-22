@@ -53,11 +53,9 @@ namespace HousingUnlocked
     // stage panels and partitions) is within the item's wall snap threshold.
     public bool ShowWallSnapWarning { get; set; } = true;
 
-    // The engine PROJECTS wall items back onto the wall plane on deselect within
-    // a capture range larger than the halved TargetMarker value (measured
-    // in-game: the skylight projects from pivot distance 3.25 = full marker
-    // distance 3.0 + 0.25). The warning limit is therefore full marker
-    // distance + this margin.
+    // Epsilon added on top of the EXACT wall projection capture base (authored
+    // SphereCastRange or the derived collision half-extent). The base itself is
+    // the engine's real value; this only widens the warning by a hair.
     public float WallCaptureMargin { get; set; } = 0.25f;
 
     public void Save()
