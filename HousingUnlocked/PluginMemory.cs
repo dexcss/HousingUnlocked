@@ -851,11 +851,13 @@ namespace HousingUnlocked
       }
 
       // The engine allows a small gap above the tabletop, scaled by the item's
-      // footprint (like the floor snap): reach = min(visual width, depth) / 2.
-      // Measured on the Used Banquet Table: basket gap 0.125 snaps / 0.448 doesn't;
-      // bag 0.055 snaps / 0.133 doesn't; glass 0.054 snaps / 0.132 doesn't.
-      var footprint = System.Math.Min(bbMax.X - bbMin.X, bbMax.Z - bbMin.Z) * 0.5f;
-      var reach = ActiveItemSnapThreshold > 0f ? ActiveItemSnapThreshold : footprint;
+      // footprint. Calibrated against every in-game observation (Used Banquet Table):
+      //   glass   min XZ 0.097 -> snap at 0.034, no at 0.132  => reach ~0.036
+      //   bag     min XZ 0.196 -> snap at 0.055, no at 0.085  => reach ~0.074
+      //   basket  min XZ 0.933 -> snap at 0.125, no at 0.439  => reach ~0.350
+      // => reach = 0.375 * min(width, depth)  (0.75 * the half-extent).
+      var footprint = System.Math.Min(bbMax.X - bbMin.X, bbMax.Z - bbMin.Z);
+      var reach = ActiveItemSnapThreshold > 0f ? ActiveItemSnapThreshold : System.Math.Max(0.02f, footprint * 0.375f);
 
       var candidates = GetNearbyTableSurfaces();
       float best = float.PositiveInfinity;
