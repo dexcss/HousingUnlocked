@@ -110,9 +110,9 @@ namespace HousingUnlocked.Interface.Components
         ImGui.EndTooltip();
       }
 
-      // The item itself glows: draw a green/red highlight over the active item's
-      // projected world bounds. GREEN = good (no snap), RED = a snap will fire.
-      // (The game's own orange selection glow is engine-side and cannot be recolored.)
+      // Green/red glow on the item itself. The game's own orange selection glow is
+      // engine-rendered and cannot be recolored from a plugin, so draw a soft glow
+      // wash over the active item's projected bounds (background draw list: behind UI).
       if (Memory.HousingStructure != null && Memory.HousingStructure->ActiveItem != null)
       {
         var bounds = Memory.GetActiveItemWorldBounds();
@@ -120,9 +120,13 @@ namespace HousingUnlocked.Interface.Components
         {
           var bbMin = bounds.Value.Min;
           var bbMax = bounds.Value.Max;
-          var projected = true;
+          var display = ImGui.GetIO().DisplaySize;
+          var margin = new Vector2(80f, 80f);
+          var lo = new Vector2(-margin.X, -margin.Y);
+          var hi = display + margin;
           var screenMin = new Vector2(float.MaxValue, float.MaxValue);
           var screenMax = new Vector2(float.MinValue, float.MinValue);
+          var projections = 0;
           for (var corner = 0; corner < 8; corner++)
           {
             var world = new Vector3(
@@ -130,25 +134,31 @@ namespace HousingUnlocked.Interface.Components
               (corner & 2) != 0 ? bbMax.Y : bbMin.Y,
               (corner & 4) != 0 ? bbMax.Z : bbMin.Z);
             if (!Plugin.GameGui.WorldToScreen(world, out var screen))
-            {
-              projected = false;
-              break;
-            }
+              continue; // corner behind the camera; keep the ones that project
+            screen = Vector2.Clamp(screen, lo, hi);
             screenMin = Vector2.Min(screenMin, screen);
             screenMax = Vector2.Max(screenMax, screen);
+            projections++;
           }
 
-          if (projected && screenMax.X > screenMin.X && screenMax.Y > screenMin.Y)
+          if (projections >= 2 && screenMax.X - screenMin.X >= 4f && screenMax.Y - screenMin.Y >= 4f)
           {
             var good = snapSummary.Length == 0;
-            var lineColor = good ? new Vector4(.2f, 1f, .2f, 1f) : new Vector4(1f, .2f, .2f, 1f);
-            var fillColor = new Vector4(lineColor.X, lineColor.Y, lineColor.Z, .10f);
-            var pad = new Vector2(6f, 6f);
-            var topLeft = screenMin - pad;
-            var bottomRight = screenMax + pad;
-            var drawList = ImGui.GetForegroundDrawList();
-            drawList.AddRectFilled(topLeft, bottomRight, ImGui.GetColorU32(fillColor), 8f);
-            drawList.AddRect(topLeft, bottomRight, ImGui.GetColorU32(lineColor), 8f, ImDrawFlags.None, 3f);
+            var color = good ? new Vector3(.2f, 1f, .2f) : new Vector3(1f, .2f, .2f);
+            var pulse = .8f + .2f * (float)System.Math.Sin(ImGui.GetTime() * 4.0);
+            var drawList = ImGui.GetBackgroundDrawList();
+            drawList.AddRectFilled(screenMin, screenMax,
+              ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, .22f * pulse)), 8f);
+            for (var layer = 3; layer >= 1; layer--)
+            {
+              var grow = layer * 7f;
+              var expand = new Vector2(grow, grow);
+              var alpha = .10f * pulse / layer;
+              drawList.AddRectFilled(screenMin - expand, screenMax + expand,
+                ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, alpha)), 10f + grow);
+            }
+            drawList.AddRect(screenMin, screenMax,
+              ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, .95f * pulse)), 8f, ImDrawFlags.None, 3f);
           }
         }
       }
