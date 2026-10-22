@@ -850,10 +850,18 @@ namespace HousingUnlocked
         return;
       }
 
+      // The engine allows a small gap above the tabletop, scaled by the item's
+      // footprint (like the floor snap): reach = min(visual width, depth) / 2.
+      // Measured on the Used Banquet Table: basket gap 0.125 snaps / 0.448 doesn't;
+      // bag 0.055 snaps / 0.133 doesn't; glass 0.054 snaps / 0.132 doesn't.
+      var footprint = System.Math.Min(bbMax.X - bbMin.X, bbMax.Z - bbMin.Z) * 0.5f;
+      var reach = ActiveItemSnapThreshold > 0f ? ActiveItemSnapThreshold : footprint;
+
       var candidates = GetNearbyTableSurfaces();
       float best = float.PositiveInfinity;
       string bestName = "";
       float bestSurfaceY = 0f;
+      var nearestGap = float.PositiveInfinity;
       foreach (var t in candidates)
       {
         var surfaceY = t.BB.Max.Y;
@@ -863,8 +871,12 @@ namespace HousingUnlocked
         var overZ = bbMin.Z <= t.BB.Max.Z && bbMax.Z >= t.BB.Min.Z;
         if (!overX || !overZ) continue;
 
-        // …and its body must cross the tabletop plane (bottom below, top above).
-        if (bbMin.Y > surfaceY || bbMax.Y < surfaceY) continue;
+        // …and its base within the footprint-derived reach above the surface
+        // (a negative gap means the base is inside the table — still snaps).
+        var gap = surfaceY - bbMin.Y;
+        if (gap < nearestGap)
+          nearestGap = gap;
+        if (gap > reach) continue;
 
         var dy = System.Math.Abs(surfaceY - pos.Y);
         if (dy < best)
@@ -875,7 +887,8 @@ namespace HousingUnlocked
         }
       }
 
-      TableSnapDiagnostic = $"{candidates.Count} TableTop receiver(s), item Y [{bbMin.Y:0.###}..{bbMax.Y:0.###}] pivot {pos.Y:0.###}{(sourceNote.Length > 0 ? ", " + sourceNote : "")}";
+      TableSnapDiagnostic = $"{candidates.Count} TableTop receiver(s), item Y [{bbMin.Y:0.###}..{bbMax.Y:0.###}] " +
+        $"XZ {bbMax.X - bbMin.X:0.###}x{bbMax.Z - bbMin.Z:0.###}, gap {(float.IsInfinity(nearestGap) ? float.NaN : nearestGap):0.###}, reach {reach:0.###}{(sourceNote.Length > 0 ? ", " + sourceNote : "")}";
 
       if (best != float.PositiveInfinity)
       {
