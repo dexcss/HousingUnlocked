@@ -1783,7 +1783,7 @@ namespace HousingUnlocked
           if (_pendingPostSnapGroup != 0 && _postSnapFrames > 0)
           {
             _postSnapFrames--;
-            var mgr = HousingModule?.GetCurrentManager();
+            var mgr = HousingModule != null ? HousingModule->GetCurrentManager() : null;
             if (mgr != null && mgr->Objects != null)
             {
               for (var i = 0; i < 600; i++)
