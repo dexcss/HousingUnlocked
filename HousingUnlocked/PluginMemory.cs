@@ -406,6 +406,15 @@ namespace HousingUnlocked
     private int _postSnapFrames;
     private int _postSnapStable;
 
+    // ==== Layout drift watch ====
+    // Catches the "snaps when you re-instance" behavior: every 2 seconds the
+    // positions of all placed items are compared against the previous snapshot;
+    // any item that moved without being dragged is logged (before -> after).
+    private readonly Dictionary<nint, Vector3> _lastLayoutSnapshot = new();
+    private nint _lastTerritoryPtr;
+    private DateTime _lastLayoutSnapTime = DateTime.MinValue;
+    private bool _layoutSeeding;
+
     // HousingItemCategory of the cached active item (15 = wall-mounted, per the
     // HousingFurniture/HousingYardObject sheets).
     private uint _cachedActiveItemCategory = 0;
@@ -1819,6 +1828,51 @@ namespace HousingUnlocked
             {
               SnapLogger.Event("postsnap_lost", $"item={_pendingPostSnapItemId} group=0x{_pendingPostSnapGroup:X}");
               _pendingPostSnapGroup = 0;
+            }
+          }
+        }
+
+        // Layout drift watch: re-instance snaps (the server re-validating placed
+        // items on load) and any un-dragged movement of placed items land here.
+        if (_isHousingOpen && HousingModule != null)
+        {
+          var cur = (nint)HousingModule->CurrentTerritory;
+          if (cur != _lastTerritoryPtr)
+          {
+            _lastTerritoryPtr = cur;
+            _lastLayoutSnapshot.Clear();
+            _layoutSeeding = true;
+            SnapLogger.Event("territory", $"currentTerritory=0x{cur:X}");
+          }
+
+          if ((DateTime.Now - _lastLayoutSnapTime).TotalMilliseconds >= 2000)
+          {
+            _lastLayoutSnapTime = DateTime.Now;
+            var mgr = HousingModule != null ? HousingModule->GetCurrentManager() : null;
+            if (mgr != null && mgr->Objects != null)
+            {
+              var activeNow = hsTrack != null ? hsTrack->ActiveItem : null;
+              for (var i = 0; i < 600; i++)
+              {
+                var addr = mgr->Objects[i];
+                if (addr == 0) continue;
+                var go = (GameObject*)addr;
+                if (activeNow != null && go->SharedGroupLayoutInstance == activeNow) continue; // dragged item covered by deselect capture
+                var key = (nint)go->SharedGroupLayoutInstance;
+                var p = go->Position;
+                if (_lastLayoutSnapshot.TryGetValue(key, out var prev))
+                {
+                  if (Vector3.Distance(p, prev) > 0.0005f)
+                    SnapLogger.Event("layout_change",
+                      $"baseId={go->BaseId} before=[{prev.X:0.####},{prev.Y:0.####},{prev.Z:0.####}] after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}]");
+                }
+                _lastLayoutSnapshot[key] = p;
+              }
+              if (_layoutSeeding)
+              {
+                _layoutSeeding = false;
+                SnapLogger.Event("layout_seed", $"count={_lastLayoutSnapshot.Count}");
+              }
             }
           }
         }
