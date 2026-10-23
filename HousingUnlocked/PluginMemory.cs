@@ -1235,13 +1235,6 @@ namespace HousingUnlocked
         if (group == null) continue;
 
         var isMultiSided = SnapRangeData.IsMultiSidedWallReceiver(cached.ItemId);
-        var insideReceiver = false;
-        if (isMultiSided)
-        {
-          var volume = GetItemColliderUnion(group);
-          if (volume.HasValue)
-            insideReceiver = ContainsPoint(volume.Value, pos);
-        }
 
         var itemInstances = group->Instances.Instances;
         var itemSize = (int)(itemInstances.Last - itemInstances.First);
@@ -1265,7 +1258,7 @@ namespace HousingUnlocked
             childM,
             probes, limit, cached.Name,
             ref bestFurn, ref bestFurnName, ref wallTris, ref hadWallTris,
-            itemFront, acceptBothSides: isMultiSided, insideVolume: insideReceiver);
+            itemFront, acceptBothSides: isMultiSided);
         }
 
         // Embedded-census fallback: known wall receiver, but no wall triangles were
@@ -1343,7 +1336,7 @@ namespace HousingUnlocked
     private static unsafe void WalkWallTriangles(
       BgPartsLayoutInstance* bgPart, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      Vector3 itemFront, bool acceptBackSide = false, bool acceptBothSides = false, bool insideVolume = false)
+      Vector3 itemFront, bool acceptBackSide = false, bool acceptBothSides = false)
     {
       var collider = bgPart->Collider;
       if (collider == null || collider->GetColliderType() != ColliderType.Mesh) return;
@@ -1352,13 +1345,13 @@ namespace HousingUnlocked
       var pcb = (MeshPCB*)meshCol->Mesh;
       if (pcb->RootNode == null) return;
 
-      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides, itemFront, insideVolume);
+      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides, itemFront);
     }
 
     private static unsafe void WalkNode(
       MeshPCB.FileNode* node, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides, Vector3 itemFront, bool insideVolume)
+      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides, Vector3 itemFront)
     {
       if (node == null || depth > 64) return;
       if (!visited.Add((nint)node)) return;
@@ -1412,11 +1405,10 @@ namespace HousingUnlocked
           float t;
           if (acceptBothSides)
           {
-            // Multi-sided receiver (hollow box / open faces):
-            //  - outside the volume: the item mounts with its BACK toward the face
-            //  - inside the volume: the engine pushes it out through the face it FACES
-            var dir = insideVolume ? itemFront : -itemFront;
-            if (!RayTriangleHit(probe, dir, a, b, c, out t) || t < 0.001f || t > limit)
+            // Multi-sided receiver: the face is a two-sided magnet � the item's BACK
+            // attaches to it from either side, within the flat 1.0 capture, and
+            // near-zero distances count (item sunk into the face plane).
+            if (!RayTriangleHit(probe, -itemFront, a, b, c, out t) || t < 0.001f || t > limit)
               continue;
           }          else
           {
@@ -1433,8 +1425,8 @@ namespace HousingUnlocked
         }
       }
 
-      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront, insideVolume);
-      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront, insideVolume);
+      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
+      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
     }
 
     /// <summary>Möller–Trumbore ray/triangle intersection (no back-face culling).</summary>
