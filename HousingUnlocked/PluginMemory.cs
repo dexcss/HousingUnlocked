@@ -17,6 +17,7 @@ using FFXIVClientStructs.FFXIV.Common.Component.BGCollision.Math;
 using CameraManager = FFXIVClientStructs.FFXIV.Client.Game.Control.CameraManager;
 using SphereBounds = FFXIVClientStructs.FFXIV.Common.Math.SphereBounds;
 using AxisAlignedBounds = FFXIVClientStructs.FFXIV.Common.Math.AxisAlignedBounds;
+using OrientedBounds = FFXIVClientStructs.FFXIV.Common.Math.OrientedBounds;
 using ColliderType = FFXIVClientStructs.FFXIV.Common.Component.BGCollision.ColliderType;
 
 namespace HousingUnlocked
@@ -356,6 +357,21 @@ namespace HousingUnlocked
       if (HousingStructure == null) { SnapThresholdDiagnostic = "no housing structure"; return 0f; }
       var active = HousingStructure->ActiveItem;
       if (active == null) { SnapThresholdDiagnostic = "no active item"; return 0f; }
+
+      // Primary floor-snap formula (Cutest/MakePlace-verified — this is what the
+      // game uses): 1/2 of the shortest horizontal length of the item's VISUAL
+      // mesh box. 2D only — the height axis is excluded. In FFXIV axes that is
+      // min(oriented X, oriented Z), i.e. the smaller horizontal half-extent of
+      // the item's oriented bounds (rotation-independent).
+      var ob = default(OrientedBounds);
+      active->GetOrientedBoundsImpl(&ob);
+      var obReach = MathF.Min(ob.HalfExtents.X, ob.HalfExtents.Z);
+      if (obReach > 0f)
+      {
+        ActiveItemThresholdIsOverride = true; // engine formula — exact, no margin
+        SnapThresholdDiagnostic = $"oriented bounds -> {obReach:0.######} (extents {ob.HalfExtents.X:0.###}/{ob.HalfExtents.Y:0.###}/{ob.HalfExtents.Z:0.###})";
+        return obReach;
+      }
 
       var instances = active->Instances.Instances;
       var size = (int)(instances.Last - instances.First);
