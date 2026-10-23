@@ -1223,6 +1223,8 @@ namespace HousingUnlocked
       string bestTerrName = "";
       int wallTris = 0;
       var usedAabbFallback = false;
+      AABB? bestFurnBB = null;
+      var bestFurnBBName = "";
 
       for (var i = 0; i < 600; i++)
       {
@@ -1260,6 +1262,7 @@ namespace HousingUnlocked
         var itemInstances = group->Instances.Instances;
         var itemSize = (int)(itemInstances.Last - itemInstances.First);
         var hadWallTris = false;
+        var beforeBestFurn = bestFurn;
 
         for (int c = 0; c < itemSize; c++)
         {
@@ -1282,6 +1285,15 @@ namespace HousingUnlocked
             itemFront, acceptBothSides: isMultiSided);
         }
 
+        if (bestFurn < beforeBestFurn)
+        {
+          var hitUnion = GetItemColliderUnion(group);
+          if (hitUnion.HasValue)
+          {
+            bestFurnBB = hitUnion.Value;
+            bestFurnBBName = cached.Name;
+          }
+        }
         // Embedded-census fallback: known wall receiver, but no wall triangles were
         // readable at runtime — fall back to a two-sided union-AABB check.
         // Embedded-census fallback: known wall receiver, but no wall triangles were
@@ -1329,7 +1341,7 @@ namespace HousingUnlocked
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} (item back, offset {backOffset:0.###}); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}), territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
+      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} (item back, offset {backOffset:0.###}); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
 
       if (furnHit || terrHit)
       {
