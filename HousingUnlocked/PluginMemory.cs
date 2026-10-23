@@ -1438,14 +1438,12 @@ namespace HousingUnlocked
           float t;
           if (acceptBothSides)
           {
-            // A multi-sided face is a two-sided magnet for the item's BACK: within
-            // the flat 1.0 capture, measured to the face itself (so grazing angles
-            // and being sunk inside still count), from either side of the face.
-            // The back must be oriented at the face (flip rule applies).
+            // Multi-sided faces are magnets: within the flat 1.0 capture measured
+            // to the face itself, from EITHER side, regardless of the item's facing.
+            // (Measured: the lantern snapped to the White Rect face from 0.18 in
+            // front and from 0.58 behind.)
             var d = DistancePointTriangle(probe, a, b, c);
             if (d > limit) continue;
-            var s = Vector3.Dot(n, probe - a);
-            if (Vector3.Dot(-itemFront, n) * s >= 0f) continue;
             t = d;
           }          else
           {
