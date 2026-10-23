@@ -1234,6 +1234,15 @@ namespace HousingUnlocked
         var group = go->SharedGroupLayoutInstance;
         if (group == null) continue;
 
+        var isMultiSided = SnapRangeData.IsMultiSidedWallReceiver(cached.ItemId);
+        var insideReceiver = false;
+        if (isMultiSided)
+        {
+          var volume = GetItemColliderUnion(group);
+          if (volume.HasValue)
+            insideReceiver = ContainsPoint(volume.Value, pos);
+        }
+
         var itemInstances = group->Instances.Instances;
         var itemSize = (int)(itemInstances.Last - itemInstances.First);
         var hadWallTris = false;
@@ -1256,7 +1265,7 @@ namespace HousingUnlocked
             childM,
             probes, limit, cached.Name,
             ref bestFurn, ref bestFurnName, ref wallTris, ref hadWallTris,
-            itemFront, acceptBothSides: SnapRangeData.IsMultiSidedWallReceiver(cached.ItemId));
+            itemFront, acceptBothSides: isMultiSided, insideVolume: insideReceiver);
         }
 
         // Embedded-census fallback: known wall receiver, but no wall triangles were
@@ -1334,7 +1343,7 @@ namespace HousingUnlocked
     private static unsafe void WalkWallTriangles(
       BgPartsLayoutInstance* bgPart, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      Vector3 itemFront, bool acceptBackSide = false, bool acceptBothSides = false)
+      Vector3 itemFront, bool acceptBackSide = false, bool acceptBothSides = false, bool insideVolume = false)
     {
       var collider = bgPart->Collider;
       if (collider == null || collider->GetColliderType() != ColliderType.Mesh) return;
@@ -1343,13 +1352,13 @@ namespace HousingUnlocked
       var pcb = (MeshPCB*)meshCol->Mesh;
       if (pcb->RootNode == null) return;
 
-      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides, itemFront);
+      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides, itemFront, insideVolume);
     }
 
     private static unsafe void WalkNode(
       MeshPCB.FileNode* node, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides, Vector3 itemFront)
+      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides, Vector3 itemFront, bool insideVolume)
     {
       if (node == null || depth > 64) return;
       if (!visited.Add((nint)node)) return;
@@ -1403,18 +1412,13 @@ namespace HousingUnlocked
           float t;
           if (acceptBothSides)
           {
-            // Multi-sided receiver, two cases:
-            //  - outside: the item mounts with its BACK toward the face (full 1.0)
-            //  - sunk inside: the engine pushes it out through the face it FACES
-            //    (front-ray, short range only — it must actually be inside)
-            var backHit = RayTriangleHit(probe, -itemFront, a, b, c, out var tb) &&
-                          tb >= 0.001f && tb <= limit;
-            var frontHit = RayTriangleHit(probe, itemFront, a, b, c, out var tf) &&
-                           tf >= 0.001f && tf <= 0.25f;
-            if (!backHit && !frontHit) continue;
-            t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
-          }
-          else
+            // Multi-sided receiver (hollow box / open faces):
+            //  - outside the volume: the item mounts with its BACK toward the face
+            //  - inside the volume: the engine pushes it out through the face it FACES
+            var dir = insideVolume ? itemFront : -itemFront;
+            if (!RayTriangleHit(probe, dir, a, b, c, out t) || t < 0.001f || t > limit)
+              continue;
+          }          else
           {
             if (!RayTriangleHit(probe, -itemFront, a, b, c, out var tr) ||
                 tr < 0.02f || tr > limit) continue;
@@ -1429,11 +1433,16 @@ namespace HousingUnlocked
         }
       }
 
-      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
-      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
+      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront, insideVolume);
+      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront, insideVolume);
     }
 
     /// <summary>Möller–Trumbore ray/triangle intersection (no back-face culling).</summary>
+    /// <summary>True when the point lies inside the AABB (with a small tolerance).</summary>
+    private static bool ContainsPoint(AABB bb, Vector3 p, float eps = 0.001f)
+      => p.X >= bb.Min.X - eps && p.X <= bb.Max.X + eps &&
+         p.Y >= bb.Min.Y - eps && p.Y <= bb.Max.Y + eps &&
+         p.Z >= bb.Min.Z - eps && p.Z <= bb.Max.Z + eps;
     private static bool RayTriangleHit(Vector3 origin, Vector3 dir, Vector3 a, Vector3 b, Vector3 c, out float t)
     {
       t = 0f;
