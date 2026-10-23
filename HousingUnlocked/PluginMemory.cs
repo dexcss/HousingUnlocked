@@ -1403,11 +1403,24 @@ namespace HousingUnlocked
           float t;
           if (acceptBothSides)
           {
-            // Multi-sided receiver: every face is attachable and the engine pulls
-            // the item out even when it is sunk inside or facing away — proximity is
-            // what matters, not the item's direction.
-            t = DistancePointTriangle(probe, a, b, c);
-            if (t > limit) continue;
+            // Multi-sided receiver: direction selects the exit face — the item snaps
+            // out through the face its back points at, and only that face. There is
+            // no face-side filter, and near-zero hits count (sunk inside the wall).
+            var backDir = -itemFront;
+            var e1 = b - a;
+            var e2 = c - a;
+            var pvec = Vector3.Cross(backDir, e2);
+            var det = Vector3.Dot(e1, pvec);
+            if (MathF.Abs(det) < 1e-7f) continue;
+            var invDet = 1f / det;
+            var tvec = probe - a;
+            var u = Vector3.Dot(tvec, pvec) * invDet;
+            if (u < 0f || u > 1f) continue;
+            var qvec = Vector3.Cross(tvec, e1);
+            var v = Vector3.Dot(backDir, qvec) * invDet;
+            if (v < 0f || u + v > 1f) continue;
+            t = Vector3.Dot(e2, qvec) * invDet;
+            if (t < 0.001f || t > limit) continue;
           }
           else
           {
