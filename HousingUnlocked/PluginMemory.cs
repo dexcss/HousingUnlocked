@@ -1403,13 +1403,13 @@ namespace HousingUnlocked
           float t;
           if (acceptBothSides)
           {
-            // Multi-sided receiver: direction selects the exit face — the item snaps
-            // out through the face its back points at, and only that face. There is
-            // no face-side filter, and near-zero hits count (sunk inside the wall).
-            var backDir = -itemFront;
+            // Multi-sided receiver: the exit face is the one the item FACES (front):
+            // measured in-game, facing left pulls it out the left, facing right the
+            // right. No face-side filter; near-zero hits count (sunk inside the wall).
+            var rayDir = itemFront;
             var e1 = b - a;
             var e2 = c - a;
-            var pvec = Vector3.Cross(backDir, e2);
+            var pvec = Vector3.Cross(rayDir, e2);
             var det = Vector3.Dot(e1, pvec);
             if (MathF.Abs(det) < 1e-7f) continue;
             var invDet = 1f / det;
@@ -1417,7 +1417,7 @@ namespace HousingUnlocked
             var u = Vector3.Dot(tvec, pvec) * invDet;
             if (u < 0f || u > 1f) continue;
             var qvec = Vector3.Cross(tvec, e1);
-            var v = Vector3.Dot(backDir, qvec) * invDet;
+            var v = Vector3.Dot(rayDir, qvec) * invDet;
             if (v < 0f || u + v > 1f) continue;
             t = Vector3.Dot(e2, qvec) * invDet;
             if (t < 0.001f || t > limit) continue;
