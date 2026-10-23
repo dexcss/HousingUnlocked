@@ -1403,43 +1403,22 @@ namespace HousingUnlocked
           float t;
           if (acceptBothSides)
           {
-            // Multi-sided receiver: the exit face is the one the item FACES (front):
-            // measured in-game, facing left pulls it out the left, facing right the
-            // right. No face-side filter; near-zero hits count (sunk inside the wall).
-            var rayDir = itemFront;
-            var e1 = b - a;
-            var e2 = c - a;
-            var pvec = Vector3.Cross(rayDir, e2);
-            var det = Vector3.Dot(e1, pvec);
-            if (MathF.Abs(det) < 1e-7f) continue;
-            var invDet = 1f / det;
-            var tvec = probe - a;
-            var u = Vector3.Dot(tvec, pvec) * invDet;
-            if (u < 0f || u > 1f) continue;
-            var qvec = Vector3.Cross(tvec, e1);
-            var v = Vector3.Dot(rayDir, qvec) * invDet;
-            if (v < 0f || u + v > 1f) continue;
-            t = Vector3.Dot(e2, qvec) * invDet;
-            if (t < 0.001f || t > limit) continue;
+            // Multi-sided receiver, two cases:
+            //  - outside: the item mounts with its BACK toward the face (full 1.0)
+            //  - sunk inside: the engine pushes it out through the face it FACES
+            //    (front-ray, short range only — it must actually be inside)
+            var backHit = RayTriangleHit(probe, -itemFront, a, b, c, out var tb) &&
+                          tb >= 0.001f && tb <= limit;
+            var frontHit = RayTriangleHit(probe, itemFront, a, b, c, out var tf) &&
+                           tf >= 0.001f && tf <= 0.25f;
+            if (!backHit && !frontHit) continue;
+            t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
           }
           else
           {
-            // One-sided receiver: the item's back-ray and the face side decide.
-            var backDir = -itemFront;
-            var e1 = b - a;
-            var e2 = c - a;
-            var pvec = Vector3.Cross(backDir, e2);
-            var det = Vector3.Dot(e1, pvec);
-            if (MathF.Abs(det) < 1e-7f) continue;
-            var invDet = 1f / det;
-            var tvec = probe - a;
-            var u = Vector3.Dot(tvec, pvec) * invDet;
-            if (u < 0f || u > 1f) continue;
-            var qvec = Vector3.Cross(tvec, e1);
-            var v = Vector3.Dot(backDir, qvec) * invDet;
-            if (v < 0f || u + v > 1f) continue;
-            t = Vector3.Dot(e2, qvec) * invDet;
-            if (t < 0.02f || t > limit) continue;
+            if (!RayTriangleHit(probe, -itemFront, a, b, c, out var tr) ||
+                tr < 0.02f || tr > limit) continue;
+            t = tr;
           }
 
           if (t < best)
@@ -1452,6 +1431,26 @@ namespace HousingUnlocked
 
       WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
       WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
+    }
+
+    /// <summary>Möller–Trumbore ray/triangle intersection (no back-face culling).</summary>
+    private static bool RayTriangleHit(Vector3 origin, Vector3 dir, Vector3 a, Vector3 b, Vector3 c, out float t)
+    {
+      t = 0f;
+      var e1 = b - a;
+      var e2 = c - a;
+      var pvec = Vector3.Cross(dir, e2);
+      var det = Vector3.Dot(e1, pvec);
+      if (MathF.Abs(det) < 1e-7f) return false;
+      var invDet = 1f / det;
+      var tvec = origin - a;
+      var u = Vector3.Dot(tvec, pvec) * invDet;
+      if (u < 0f || u > 1f) return false;
+      var qvec = Vector3.Cross(tvec, e1);
+      var v = Vector3.Dot(dir, qvec) * invDet;
+      if (v < 0f || u + v > 1f) return false;
+      t = Vector3.Dot(e2, qvec) * invDet;
+      return true;
     }
 
     /// <summary>Decodes a mesh vertex (raw floats, or compressed ushorts scaled into the node bounds).</summary>
