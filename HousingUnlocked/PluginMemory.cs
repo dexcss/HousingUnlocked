@@ -1256,44 +1256,26 @@ namespace HousingUnlocked
             childM,
             probes, limit, cached.Name,
             ref bestFurn, ref bestFurnName, ref wallTris, ref hadWallTris,
-            itemFront);
+            itemFront, acceptBothSides: SnapRangeData.IsMultiSidedWallReceiver(cached.ItemId));
         }
 
         // Embedded-census fallback: known wall receiver, but no wall triangles were
         // readable at runtime — fall back to a two-sided union-AABB check.
-        if (SnapRangeData.IsWallReceiver(cached.ItemId))
+        // Embedded-census fallback: known wall receiver, but no wall triangles were
+        // readable at runtime — fall back to the union-AABB distance.
+        if (!hadWallTris && SnapRangeData.IsWallReceiver(cached.ItemId))
         {
+          usedAabbFallback = true;
           var union = GetItemColliderUnion(group);
           if (union.HasValue)
           {
-            var bb = union.Value;
-            // Sunk inside the receiver (e.g. pushed through a thin partition): the
-            // engine pushes the item back out to a face. From inside there is no
-            // forward ray hit, so detect containment directly.
             foreach (var p in probes)
             {
-              if (p.X >= bb.Min.X && p.X <= bb.Max.X &&
-                  p.Y >= bb.Min.Y && p.Y <= bb.Max.Y &&
-                  p.Z >= bb.Min.Z && p.Z <= bb.Max.Z)
+              var d = DistancePointToAABB(p, union.Value);
+              if (d < bestFurn)
               {
-                bestFurn = 0f;
+                bestFurn = d;
                 bestFurnName = cached.Name;
-                break;
-              }
-            }
-            // Embedded-census fallback: known receiver with no readable wall
-            // triangles - use the union AABB distance (two-sided).
-            if (!hadWallTris)
-            {
-              usedAabbFallback = true;
-              foreach (var p in probes)
-              {
-                var d = DistancePointToAABB(p, bb);
-                if (d < bestFurn)
-                {
-                  bestFurn = d;
-                  bestFurnName = cached.Name;
-                }
               }
             }
           }

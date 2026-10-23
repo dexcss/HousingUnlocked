@@ -2948,6 +2948,17 @@ namespace HousingUnlocked
     /// <summary>True if the item's collision carries WallCollisionMesh (d3==1).</summary>
     public static bool IsWallReceiver(uint itemId) => WallReceiverItemIds.Contains(itemId);
 
+    /// <summary>
+    /// Multi-sided wall receivers — collision carries wall prims on more than one
+    /// axis (White Rectangular Partition, Windowed Partition, Marble Alcove Bed).
+    /// They accept wall items from every face, so the one-sided front/back filter
+    /// must not apply; only the item's back-ray direction decides.
+    /// </summary>
+    public static readonly HashSet<uint> MultiSidedWallReceiverItemIds = [24514u, 33267u, 30410u];
+
+    /// <summary>True when the receiver accepts wall items from every face.</summary>
+    public static bool IsMultiSidedWallReceiver(uint itemId) => MultiSidedWallReceiverItemIds.Contains(itemId);
+
     /// <summary>True if the item's collision carries TableTop (d4==8).</summary>
     public static bool IsTableReceiver(uint itemId) => TableReceiverItemIds.Contains(itemId);
 
