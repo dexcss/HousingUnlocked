@@ -1405,11 +1405,15 @@ namespace HousingUnlocked
           float t;
           if (acceptBothSides)
           {
-            // Multi-sided receiver: the face is a two-sided magnet — the item's BACK
-            // attaches to it from either side, within the flat 1.0 capture, and
-            // near-zero distances count (item sunk into the face plane).
-            if (!RayTriangleHit(probe, -itemFront, a, b, c, out t) || t < 0.001f || t > limit)
-              continue;
+            // A multi-sided face is a two-sided magnet for the item's BACK: within
+            // the flat 1.0 capture, measured to the face itself (so grazing angles
+            // and being sunk inside still count), from either side of the face.
+            // The back must be oriented at the face (flip rule applies).
+            var d = DistancePointTriangle(probe, a, b, c);
+            if (d > limit) continue;
+            var s = Vector3.Dot(n, probe - a);
+            if (Vector3.Dot(-itemFront, n) * s >= 0f) continue;
+            t = d;
           }          else
           {
             if (!RayTriangleHit(probe, -itemFront, a, b, c, out var tr) ||
