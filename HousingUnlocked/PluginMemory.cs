@@ -1396,34 +1396,39 @@ namespace HousingUnlocked
 
         foreach (var probe in probes)
         {
-          // Side eligibility (which faces may accept items):
-          //  - house/territory walls: either side (the back-ray decides)
-          //  - furniture false walls: the side the wall-triangle normal points at
-          //    (the panel's snapping face). Turning the panel around flips the
-          //    normal, so the room side becomes the back and nothing attaches.
+          // Side eligibility (one-sided receivers only).
           var side = Vector3.Dot(n, probe - a);
           if (!acceptBothSides && (acceptBackSide ? side > 0f : side < 0f)) continue;
 
-          // Back-ray: the item attaches when a ray from its pivot along its BACK
-          // (local -Z) reaches the surface within the flat 1.0 capture. This is the
-          // measured angular behavior: at 0.404 from a wall it snaps at 65°
-          // (0.404/cos65 = 0.956) but not at 70° (0.404/cos70 = 1.18). It also
-          // makes the 180° flip fail naturally — the ray points away from the wall.
-          var backDir = -itemFront;
-          var e1 = b - a;
-          var e2 = c - a;
-          var pvec = Vector3.Cross(backDir, e2);
-          var det = Vector3.Dot(e1, pvec);
-          if (MathF.Abs(det) < 1e-7f) continue;
-          var invDet = 1f / det;
-          var tvec = probe - a;
-          var u = Vector3.Dot(tvec, pvec) * invDet;
-          if (u < 0f || u > 1f) continue;
-          var qvec = Vector3.Cross(tvec, e1);
-          var v = Vector3.Dot(backDir, qvec) * invDet;
-          if (v < 0f || u + v > 1f) continue;
-          var t = Vector3.Dot(e2, qvec) * invDet;
-          if (t < 0.02f || t > limit) continue; // 0 = pivot already on the surface (nothing to snap)
+          float t;
+          if (acceptBothSides)
+          {
+            // Multi-sided receiver: every face is attachable and the engine pulls
+            // the item out even when it is sunk inside or facing away — proximity is
+            // what matters, not the item's direction.
+            t = DistancePointTriangle(probe, a, b, c);
+            if (t > limit) continue;
+          }
+          else
+          {
+            // One-sided receiver: the item's back-ray and the face side decide.
+            var backDir = -itemFront;
+            var e1 = b - a;
+            var e2 = c - a;
+            var pvec = Vector3.Cross(backDir, e2);
+            var det = Vector3.Dot(e1, pvec);
+            if (MathF.Abs(det) < 1e-7f) continue;
+            var invDet = 1f / det;
+            var tvec = probe - a;
+            var u = Vector3.Dot(tvec, pvec) * invDet;
+            if (u < 0f || u > 1f) continue;
+            var qvec = Vector3.Cross(tvec, e1);
+            var v = Vector3.Dot(backDir, qvec) * invDet;
+            if (v < 0f || u + v > 1f) continue;
+            t = Vector3.Dot(e2, qvec) * invDet;
+            if (t < 0.02f || t > limit) continue;
+          }
+
           if (t < best)
           {
             best = t;
