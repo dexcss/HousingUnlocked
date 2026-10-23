@@ -1183,14 +1183,35 @@ namespace HousingUnlocked
       var limit = capture;
       var territoryLimit = capture;
       LastWallSnapThreshold = capture;
-      // Probe points: the item pivot only.
       var pos = active->Transform.Translation;
-      var probes = new List<Vector3> { pos };
 
       // The item's world front (+Z local). Wall items only attach when their front
-      // points the same way as the wall surface â€” flipping the item 180Â° (front
+      // points the same way as the wall surface — flipping the item 180° (front
       // toward the wall) kills the snap for house walls and false walls alike.
       var itemFront = Vector3.Transform(Vector3.UnitZ, active->Transform.Rotation);
+
+      // The engine snaps the item's BACK SURFACE to the wall, not its pivot. Items
+      // have different depths ("thicker and thinner"), so measure how far the visual
+      // bounds extend behind the pivot along the facing axis and probe from there.
+      var backOffset = 0f;
+      if (GetActiveItemWorldBounds() is { } bounds)
+      {
+        var minAlongFront = float.MaxValue;
+        var bbMin = bounds.Min;
+        var bbMax = bounds.Max;
+        for (var corner = 0; corner < 8; corner++)
+        {
+          var c = new Vector3(
+            (corner & 1) != 0 ? bbMax.X : bbMin.X,
+            (corner & 2) != 0 ? bbMax.Y : bbMin.Y,
+            (corner & 4) != 0 ? bbMax.Z : bbMin.Z);
+          minAlongFront = MathF.Min(minAlongFront, Vector3.Dot(c - pos, itemFront));
+        }
+        backOffset = MathF.Max(0f, -minAlongFront);
+      }
+
+      var probe = pos - itemFront * backOffset;
+      var probes = new List<Vector3> { probe };
 
       // One-sided wall surface scan: walk placed receivers' wall-flagged collision
       // triangles in world space and measure each probe against the FRONT side only.
@@ -1308,7 +1329,7 @@ namespace HousingUnlocked
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} (item back); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}), territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
+      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} (item back, offset {backOffset:0.###}); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}), territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
 
       if (furnHit || terrHit)
       {
