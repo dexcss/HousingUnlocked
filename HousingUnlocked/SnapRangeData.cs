@@ -137,6 +137,10 @@ namespace HousingUnlocked
       { 48100u, 0.5f }, // East End Tree
       { 48106u, 0.05f }, // No-entry Door Partition
       { 48115u, 0.2f }, // Vault Rib
+      { 38582u, 1f }, // Hydaelyn, as We Know Her
+      { 40761u, 1f }, // Authentic Copy of Gods Revel, Lands Tremble
+      { 41120u, 1f }, // Authentic Copy of As Goes Light, So Goes Darkness
+      { 41125u, 1f }, // Authentic Copy of Vows of Virtue, Deeds of Cruelty
     };
 
     /// <summary>Item RowId -> wall snap threshold in yalms (TargetMarker-derived, category-15 items).</summary>
