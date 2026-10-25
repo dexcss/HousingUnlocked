@@ -1454,13 +1454,18 @@ namespace HousingUnlocked
           float t;
           if (acceptBothSides)
           {
-            // Multi-sided faces are magnets: within the flat 1.0 capture measured
-            // to the face itself, from EITHER side, regardless of the item's facing.
-            // (Measured: the lantern snapped to the White Rect face from 0.18 in
-            // front and from 0.58 behind.)
-            var d = DistancePointTriangle(probe, a, b, c);
-            if (d > limit) continue;
-            t = d;
+            // Multi-sided receiver — MakePlace rule (Cutest, ported):
+            //   frontVector = rotation * (0, 100, 0)
+            //   LineTraceSingleByChannel(position + frontVector, position - frontVector, WALL_CHANNEL)
+            // A bidirectional line trace along the item's facing axis, 1.0 yalm each
+            // way; the first wall surface hit is the snap target. The facing side
+            // selects which side the item is pulled out of.
+            var backHit = RayTriangleHit(probe, -itemFront, a, b, c, out var tb) &&
+                          tb >= 0.001f && tb <= limit;
+            var frontHit = RayTriangleHit(probe, itemFront, a, b, c, out var tf) &&
+                           tf >= 0.001f && tf <= limit;
+            if (!backHit && !frontHit) continue;
+            t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
           }          else
           {
             if (!RayTriangleHit(probe, -itemFront, a, b, c, out var tr) ||
