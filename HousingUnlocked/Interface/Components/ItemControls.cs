@@ -179,6 +179,17 @@ namespace HousingUnlocked.Interface.Components
         return _shownSummary;
       }
 
+      // Warnings appear immediately: holding a green status for 160 ms while a
+      // snap is already starting reads as "it said it wouldn't snap". Only the
+      // clearing (warning -> green) is held, so boundary jitter can't blank it.
+      if (raw.Length > 0 && _shownSummary.Length == 0)
+      {
+        _shownSummary = raw;
+        _pendingSummary = raw;
+        _pendingSince = now;
+        return _shownSummary;
+      }
+
       if (raw != _pendingSummary)
       {
         _pendingSummary = raw;

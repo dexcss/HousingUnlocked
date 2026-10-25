@@ -24,6 +24,11 @@ namespace HousingUnlocked
 {
   public class PluginMemory
   {
+    // Extra reach added to mesh-footprint-derived floor snap distances. The raw
+    // footprint/2 is a couple of centimetres under the engine's real release
+    // distance (Log Pillar: 0.2219 computed, engine snapped up to ~0.24).
+    private const float FloorSnapMargin = 0.02f;
+
     private bool _isHousingOpen;
 
     // Layout and housing module pointers.
@@ -359,10 +364,10 @@ namespace HousingUnlocked
       if (active == null) { SnapThresholdDiagnostic = "no active item"; return 0f; }
 
       // Floor snap distance:
-      //  1. authored SphereCastRange (handled by the caller — exact)
+      //  1. authored SphereCastRange (handled by the caller ï¿½ exact)
       //  2. collider footprint / 2 (validated: Grassy Rug 2.0 vs 2.06)
       //  3. collider-less items (glass, bag, Log Pillar): the game uses a small
-      //     fixed distance — measured on the Log Pillar: snapped at 0.179,
+      //     fixed distance ï¿½ measured on the Log Pillar: snapped at 0.179,
       //     floated at 0.244 (the visual-box formula does NOT apply to these).
       var instances = active->Instances.Instances;
       var size = (int)(instances.Last - instances.First);
@@ -403,8 +408,12 @@ namespace HousingUnlocked
               var lbD = lb.Max.Z - lb.Min.Z;
               if (lbW > 0f && lbD > 0f)
               {
-                childThreshold = System.Math.Min(lbW, lbD) * 0.5f;
-                source = "mesh.LocalBounds";
+                // 1/2 of the shortest horizontal footprint + a small safety
+                // margin. The raw footprint/2 sits slightly under the engine's
+                // real release distance (Log Pillar: mesh/2 = 0.2219, engine
+                // snapped up to ~0.24 â€” snapped at 0.179, floated at 0.241).
+                childThreshold = System.Math.Min(lbW, lbD) * 0.5f + FloorSnapMargin;
+                source = $"mesh.LocalBounds+{FloorSnapMargin:0.##}";
               }
             }
           }
