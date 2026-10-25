@@ -642,6 +642,26 @@ namespace HousingUnlocked
           // Floor-below case is already handled by the downward raycast above.
         }
       }
+      else if (HousingModule != null)
+      {
+        // Outdoor: there are no fixed floor levels, so find the floor-top surface
+        // above the item by casting down from well above it. If that surface sits
+        // above the pivot, the item is sunk into the terrain/deck and the engine
+        // pulls it up onto the surface — same rule as the indoor floor-above case,
+        // measured from the pivot. Hits inside the item's own vertical span (the
+        // held preview collider, if it is in the scene at all) are ignored.
+        var upOrigin = new Vector3(pos.X, pos.Y + 60f, pos.Z);
+        if (BGCollisionModule.RaycastMaterialFilter(upOrigin, new Vector3(0f, -1f, 0f), out var upHit, 200f))
+        {
+          var surfaceY = upOrigin.Y - upHit.Distance;
+          var insideItem = surfaceY >= lowestY - 0.1f && surfaceY <= highestY + 0.1f;
+          if (!insideItem && surfaceY > pos.Y + 0.02f)
+          {
+            ceilingGap = surfaceY - pos.Y;
+            foundUpwardSnap = true;
+          }
+        }
+      }
 
       LastCeilingRaycastHit = foundUpwardSnap;
       LastCeilingRaycastDistance = ceilingGap;
