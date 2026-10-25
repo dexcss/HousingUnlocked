@@ -50,8 +50,9 @@ namespace HousingUnlocked
         _writer = new StreamWriter(_file, append: false, Encoding.UTF8) { AutoFlush = true };
         _lines = 0;
         _lastSig = "";
-        WriteRaw("session", $"\"reason\":\"{Esc(reason)}\",\"log_path\":\"{Esc(_file)}\"");
-        Plugin.Chat.Print($"[HU] Logging started: {_file}");
+        var version = Plugin.PluginInterface?.Manifest?.AssemblyVersion?.ToString() ?? "?";
+        WriteRaw("session", $"\"reason\":\"{Esc(reason)}\",\"version\":\"{Esc(version)}\",\"log_path\":\"{Esc(_file)}\"");
+        Plugin.Chat.Print($"[HU] Logging started (v{version}): {_file}");
       }
       catch (Exception e)
       {
