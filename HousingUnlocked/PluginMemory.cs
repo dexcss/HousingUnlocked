@@ -684,51 +684,49 @@ namespace HousingUnlocked
       }
       else if (HousingModule != null)
       {
-        // Outdoor: there are no fixed floor levels, so find the floor-top surface
-        // above the item by casting down from well above it. If that surface sits
-        // above the pivot, the item is sunk into the terrain/deck and the engine
-        // pulls it up onto the surface — same rule as the indoor floor-above case,
-        // measured from the pivot. The probes sit just outside the item's footprint
-        // (casting through the item would hit its own collider first) and start
-        // 10 yalms above the pivot so any surface above the item is in range.
-        var obUp = default(OrientedBounds);
-        active->GetOrientedBoundsImpl(&obUp);
-        var side = MathF.Max(obUp.HalfExtents.X, obUp.HalfExtents.Z) + 0.3f;
-        Span<Vector3> upOffsets = stackalloc Vector3[]
+        // Outdoor: no fixed floor levels. The engine uses the floor-top surface
+        // directly above the item's PIVOT - a deck edge beside the item must not
+        // count (Summer Bonfire: an adjacent 19.0 deck made the old
+        // outside-footprint probes report "floor above" while the pivot only had
+        // the 20.0 roof over it). The held item's own colliders are hidden from
+        // raycasts while probing so the ray cannot stop on the item itself.
+        // Every surface above the pivot is walked and the nearest one wins
+        // (plot: deck at 19.0033 pulls up from 18.22, not 18.21; bonfire: the
+        // 20.0 roof pulls up from 18.83, not 18.82).
+        var savedCount = ownColliders.Count;
+        Span<nint> savedPtrs = stackalloc nint[savedCount];
+        Span<byte> savedFlags = stackalloc byte[savedCount];
+        for (var oi = 0; oi < savedCount; oi++)
         {
-          new Vector3(side, 0f, 0f), new Vector3(-side, 0f, 0f),
-          new Vector3(0f, 0f, side), new Vector3(0f, 0f, -side),
-        };
-        for (var ui = 0; ui < upOffsets.Length; ui++)
+          var col = (Collider*)ownColliders[oi];
+          savedPtrs[oi] = ownColliders[oi];
+          savedFlags[oi] = col->VisibilityFlags;
+          col->VisibilityFlags &= 0xFE; // bit0 = active for raycasts
+        }
+        try
         {
-          var off = upOffsets[ui];
-          // Enumerate every floor-top surface above the pivot, not just the
-          // highest one: a yard can stack a deck (19.0) under a roof (20.0), and
-          // the engine snaps to the NEAREST surface above (measured: bottom floor
-          // 19.0033 pulls the item up from 18.22 but not from 18.21). The first
-          // downward hit from +10 yalms is the highest surface; stepping below
-          // each hit walks the stack down to the pivot.
           var probeY = pos.Y + 10f;
           for (var iter = 0; iter < 8; iter++)
           {
-            var upOrigin = new Vector3(pos.X + off.X, probeY, pos.Z + off.Z);
+            var upOrigin = new Vector3(pos.X, probeY, pos.Z);
             if (!RaycastFloorTopAll(upOrigin, new Vector3(0f, -1f, 0f), 100f, out var upHit)) break;
             var surfaceY = probeY - upHit.Distance;
             if (surfaceY <= pos.Y + 0.02f) break; // reached the pivot; nothing above left
-            if (!ownColliders.Contains((nint)upHit.Object))
+            var gapUp = surfaceY - pos.Y;
+            if (gapUp < ceilingGap)
             {
-              var gapUp = surfaceY - pos.Y;
-              if (gapUp < ceilingGap)
-              {
-                ceilingGap = gapUp;
-                foundUpwardSnap = true;
-              }
+              ceilingGap = gapUp;
+              foundUpwardSnap = true;
             }
             probeY = surfaceY - 0.02f;
           }
         }
+        finally
+        {
+          for (var oi = 0; oi < savedCount; oi++)
+            ((Collider*)savedPtrs[oi])->VisibilityFlags = savedFlags[oi];
+        }
       }
-
       LastCeilingRaycastHit = foundUpwardSnap;
       LastCeilingRaycastDistance = ceilingGap;
 
