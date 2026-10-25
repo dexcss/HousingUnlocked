@@ -1373,17 +1373,29 @@ namespace HousingUnlocked
       foreach (var (inst, bb) in _territoryWallCache)
       {
         var near = false;
+        var contained = false;
         foreach (var p in probes)
         {
-          if (DistancePointToAABB(p, bb) <= territoryLimit) { near = true; break; }
+          if (ContainsPoint(bb, p)) { contained = true; }
+          if (DistancePointToAABB(p, bb) <= 2.5f) { near = true; break; }
         }
-        if (!near) continue;
+        if (!near && !contained) continue;
 
         var m = BuildMatrix(*((BgPartsLayoutInstance*)inst)->GetTransformImpl());
         var dummy = false;
         // House walls: distance to the attachable face only — no half-space test,
         // so an item behind the plane (inside the wall) still snaps forward onto it.
         WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, territoryLimit, "house wall", ref bestTerr, ref bestTerrName, ref wallTris, ref dummy, itemFront, acceptBothSides: true);
+        // Sunk inside the wall itself: the engine pushes the item back out to the
+        // room side at any depth (measured: the lantern 1.06 inside the west wall
+        // pushed out 1.27). The 1.0 ray capture misses deep items, so detect
+        // containment directly.
+        if (contained && bestTerr > 0f)
+        {
+          bestTerr = 0f;
+          bestTerrName = "house wall";
+          dummy = true;
+        }
       }
 
       var furnHit = bestFurn <= limit;
