@@ -25,9 +25,9 @@ namespace HousingUnlocked
   public class PluginMemory
   {
     // Extra reach added to mesh-footprint-derived floor snap distances. The raw
-    // footprint/2 sits under the engine's real release distance (Log Pillar:
-    // 0.2219 computed, engine snaps up to ~0.32 measured in green-zone tests).
-    private const float FloorSnapMargin = 0.04f;
+    // footprint/2 sits under the engine's real snap distance (Log Pillar: 0.2219
+    // computed; the engine keeps snapping in the last green band up to ~0.35).
+    private const float FloorSnapMargin = 0.06f;
 
     private bool _isHousingOpen;
 
@@ -413,7 +413,7 @@ namespace HousingUnlocked
                 // real release distance (Log Pillar: mesh/2 = 0.2219, engine
                 // snapped up to ~0.24 — snapped at 0.179, floated at 0.241).
                 childThreshold = System.Math.Min(lbW, lbD) * 0.5f + FloorSnapMargin;
-                source = $"mesh.LocalBounds+{FloorSnapMargin:0.##}";
+                source = $"mesh.LocalBounds+{FloorSnapMargin:0.##} (Y {lb.Min.Y:0.###}..{lb.Max.Y:0.###})";
               }
             }
           }
