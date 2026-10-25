@@ -1378,7 +1378,7 @@ namespace HousingUnlocked
             childM,
             probes, limit, cached.Name,
             ref itemBest, ref itemName, ref wallTris, ref hadWallTris,
-            itemFront, acceptBackSide: true, acceptBothSides: isMultiSided);
+            itemFront, acceptBackSide: false, acceptBothSides: true);
         }
 
         if (itemBest < beforeItemBest)
@@ -1599,13 +1599,11 @@ namespace HousingUnlocked
             t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
           }          else
           {
-            // Single-face receiver (stage panels, wall cabinets, ...): plain distance
-            // to the face — but only while the item still faces the wall surface.
-            // Measured: the engine refuses to attach a wall item rotated ~20°+ off
-            // the panel (MakePlace's facing rule: the item's front must point the
-            // same way as the wall surface). Without this gate a pure distance
-            // check keeps warning at every angle.
-            if (acceptBackSide && MathF.Abs(Vector3.Dot(itemFront, n)) < 0.966f) continue; // ~15°
+            // Fallback for callers that don't pass the facing axis: plain distance
+            // to the face. All wall receivers (one-sided included) use the
+            // bidirectional facing ray — measured: the engine attaches from close
+            // range at any angle but only from ~1.0/cos(angle) along the item's
+            // facing axis, which is exactly the ray rule (same as multi-face).
             var d = DistancePointTriangle(probe, a, b, c);
             if (d > limit) continue;
             t = d;
