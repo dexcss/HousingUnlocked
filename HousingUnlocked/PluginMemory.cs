@@ -1385,15 +1385,13 @@ namespace HousingUnlocked
       foreach (var (inst, bb) in _territoryWallCache)
       {
         var near = false;
-        var contained = false;
         var bbDist = float.PositiveInfinity;
         foreach (var p in probes)
         {
-          if (ContainsPoint(bb, p)) { contained = true; }
           bbDist = MathF.Min(bbDist, DistancePointToAABB(p, bb));
-          if (bbDist <= 2.5f) { near = true; break; }
+          if (bbDist <= territoryLimit) { near = true; break; }
         }
-        if (!near && !contained)
+        if (!near)
         {
           terrDiag.Append($"[bb={bbDist:0.##} skip]");
           continue;
@@ -1401,24 +1399,15 @@ namespace HousingUnlocked
 
         var m = BuildMatrix(*((BgPartsLayoutInstance*)inst)->GetTransformImpl());
         var dummy = false;
-        // Per-wall score: scoring straight into bestTerr lets a later wall's
-        // containment override an earlier wall's real triangle hit (and vice versa).
+        // Per-wall score so each surface's result is visible in the diagnostic;
+        // the winning wall is still the closest triangle hit (pre-1.15.12 rule —
+        // containment / deep-inside hits were reverted, they over-warned).
         var wallBest = float.PositiveInfinity;
         var wallName = "";
         // House walls: distance to the attachable face only — no half-space test,
-        // so an item behind the plane (inside the wall) still snaps forward onto it.
+        // so an item slightly behind the plane still snaps forward onto it.
         WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, territoryLimit, "house wall", ref wallBest, ref wallName, ref wallTris, ref dummy, itemFront, acceptBothSides: true);
-        var triBest = wallBest;
-        // Sunk inside the wall itself: the engine pushes the item back out to the
-        // room side at any depth. The 1.0 ray capture misses deep items, so detect
-        // containment directly.
-        if (contained && wallBest > 0f)
-        {
-          wallBest = 0f;
-          wallName = "house wall";
-          dummy = true;
-        }
-        terrDiag.Append($"[bb={bbDist:0.##} in={(contained ? 1 : 0)} tri={(float.IsInfinity(triBest) ? "-" : triBest.ToString("0.###"))}]");
+        terrDiag.Append($"[bb={bbDist:0.##} tri={(float.IsInfinity(wallBest) ? "-" : wallBest.ToString("0.###"))}]");
         if (wallBest < bestTerr)
         {
           bestTerr = wallBest;
