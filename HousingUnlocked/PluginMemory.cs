@@ -872,11 +872,14 @@ namespace HousingUnlocked
       //   glass   min XZ 0.097 -> snapped at 0.041/0.050 -> floor ~0.055
       //   bag     min XZ 0.196 -> snaps at 0.079, floats at 0.085
       //   basket  min XZ 0.933 -> snaps at 0.350, floats at 0.439
-      // reach = max(0.05, 0.4 * min(width, depth) + 0.002)
-      var footprint = System.Math.Min(bbMax.X - bbMin.X, bbMax.Z - bbMin.Z);
-      var reach = ActiveItemSnapThreshold > 0f
+      // Tabletop reach calibrated on the Used Banquet Table (glass/bag/basket):
+      //   0.8 × the item's floor snap distance (min horizontal half-extent of the
+      //   visual box) + 2 mm, floor 0.05. (1.15.0 broke this by making the
+      //   threshold non-zero for tabletop items — the raw value inflated the reach.)
+      var floorReach = ActiveItemSnapThreshold > 0f
         ? ActiveItemSnapThreshold
-        : System.Math.Max(0.05f, footprint * 0.4f + 0.002f);
+        : System.Math.Min(bbMax.X - bbMin.X, bbMax.Z - bbMin.Z) * 0.5f;
+      var reach = System.Math.Max(0.05f, floorReach * 0.8f + 0.002f);
 
       var candidates = GetNearbyTableSurfaces();
       float best = float.PositiveInfinity;
