@@ -521,6 +521,27 @@ namespace HousingUnlocked
     /// returned distance accounts for that lift, so it represents the gap from
     /// the item's actual base to the surface beneath it.
     /// </remarks>
+    /// <summary>
+    /// Floor-top material raycast across ALL collision layers. The Dalamud helper
+    /// filters to layer 1 and misses placed floor props (gravel plots, decks) that
+    /// live on another layer — outdoors the ray then reports the terrain far below
+    /// instead of the walkway under the item.
+    /// </summary>
+    private static unsafe bool RaycastFloorTopAll(Vector3 origin, Vector3 direction, float maxDistance, out FFXIVClientStructs.FFXIV.Common.Component.BGCollision.RaycastHit hit)
+    {
+      hit = default;
+      var framework = FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance();
+      var module = framework != null ? framework->BGCollisionModule : null;
+      if (module == null) return false;
+      var flags = stackalloc int[] { 0x4000, 0, 0x4000, 0 };
+      var o = origin;
+      var d = direction;
+      var h = default(FFXIVClientStructs.FFXIV.Common.Component.BGCollision.RaycastHit);
+      var ok = module->RaycastMaterialFilter(&h, &o, &d, maxDistance, -1, flags);
+      hit = h;
+      return ok;
+    }
+
     public unsafe float GetDistanceToFloorBelow()
     {
       if (HousingStructure == null || HousingStructure->ActiveItem == null)
@@ -566,9 +587,10 @@ namespace HousingUnlocked
 
       // === Downward ray: distance to floor below the item ===
       // Start 1 mm below the item's lowest point so the item's own collider cannot
-      // block the ray. If that misses, the base is resting on (or sunk into) the
-      // surface — common for outdoor plots sitting on the terrain — so retry from
-      // just above the lowest point, where the ray can cross the surface.
+      // block the ray, then also probe from just above it. A resting base can sit
+      // *inside* the top surface, in which case the lower probe slips through and
+      // hits a floor far below (the ward-connector floor that runs under the plot,
+      // ~19 yalms down). Use the NEAREST surface across all probes, never the first.
       var downDir = new Vector3(0f, -1f, 0f);
       float floorGap = float.PositiveInfinity;
       var gotFloor = false;
@@ -577,12 +599,11 @@ namespace HousingUnlocked
       {
         var offset = downOffsets[oi];
         var downOrigin = new Vector3(pos.X, lowestY + offset, pos.Z);
-        if (!BGCollisionModule.RaycastMaterialFilter(downOrigin, downDir, out var downHit, 100f)) continue;
+        if (!RaycastFloorTopAll(downOrigin, downDir, 100f, out var downHit)) continue;
         var gap = downHit.Distance - offset + (pos.Y - lowestY);
         if (gap < 0f) gap = 0f;
-        floorGap = gap;
+        if (gap < floorGap) floorGap = gap;
         gotFloor = true;
-        break;
       }
       if (gotFloor)
       {
@@ -651,7 +672,7 @@ namespace HousingUnlocked
         // measured from the pivot. Hits inside the item's own vertical span (the
         // held preview collider, if it is in the scene at all) are ignored.
         var upOrigin = new Vector3(pos.X, pos.Y + 60f, pos.Z);
-        if (BGCollisionModule.RaycastMaterialFilter(upOrigin, new Vector3(0f, -1f, 0f), out var upHit, 200f))
+        if (RaycastFloorTopAll(upOrigin, new Vector3(0f, -1f, 0f), 200f, out var upHit))
         {
           var surfaceY = upOrigin.Y - upHit.Distance;
           var insideItem = surfaceY >= lowestY - 0.1f && surfaceY <= highestY + 0.1f;
