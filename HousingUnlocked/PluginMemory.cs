@@ -1199,35 +1199,14 @@ namespace HousingUnlocked
       var limit = capture;
       var territoryLimit = capture;
       LastWallSnapThreshold = capture;
-      var pos = active->Transform.Translation;
-
       // The item's world front (+Z local). Wall items only attach when their front
       // points the same way as the wall surface — flipping the item 180° (front
       // toward the wall) kills the snap for house walls and false walls alike.
       var itemFront = Vector3.Transform(Vector3.UnitZ, active->Transform.Rotation);
 
-      // The engine snaps the item's BACK SURFACE to the wall, not its pivot. Items
-      // have different depths ("thicker and thinner"), so measure how far the visual
-      // bounds extend behind the pivot along the facing axis and probe from there.
-      var backOffset = 0f;
-      if (GetActiveItemWorldBounds() is { } bounds)
-      {
-        var minAlongFront = float.MaxValue;
-        var bbMin = bounds.Min;
-        var bbMax = bounds.Max;
-        for (var corner = 0; corner < 8; corner++)
-        {
-          var c = new Vector3(
-            (corner & 1) != 0 ? bbMax.X : bbMin.X,
-            (corner & 2) != 0 ? bbMax.Y : bbMin.Y,
-            (corner & 4) != 0 ? bbMax.Z : bbMin.Z);
-          minAlongFront = MathF.Min(minAlongFront, Vector3.Dot(c - pos, itemFront));
-        }
-        backOffset = MathF.Max(0f, -minAlongFront);
-      }
-
-      var probe = pos - itemFront * backOffset;
-      var probes = new List<Vector3> { probe };
+      // Probe points: the item pivot (MakePlace traces from the actor position).
+      var pos = active->Transform.Translation;
+      var probes = new List<Vector3> { pos };
 
       // One-sided wall surface scan: walk placed receivers' wall-flagged collision
       // triangles in world space and measure each probe against the FRONT side only.
@@ -1357,7 +1336,7 @@ namespace HousingUnlocked
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} (item back, offset {backOffset:0.###}); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
+      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} (item back); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
 
       if (furnHit || terrHit)
       {
@@ -1449,7 +1428,7 @@ namespace HousingUnlocked
         {
           // Side eligibility (one-sided receivers only).
           var side = Vector3.Dot(n, probe - a);
-          if (!acceptBothSides && (acceptBackSide ? side > 0f : side < 0f)) continue;
+          if (!acceptBothSides && side < -0.1f) continue; // allow slightly sunk items (pushed back out)
 
           float t;
           if (acceptBothSides)
@@ -1461,15 +1440,15 @@ namespace HousingUnlocked
             // way; the first wall surface hit is the snap target. The facing side
             // selects which side the item is pulled out of.
             var backHit = RayTriangleHit(probe, -itemFront, a, b, c, out var tb) &&
-                          tb >= 0.001f && tb <= limit;
+                          tb >= -0.1f && tb <= limit;
             var frontHit = RayTriangleHit(probe, itemFront, a, b, c, out var tf) &&
-                           tf >= 0.001f && tf <= limit;
+                           tf >= -0.1f && tf <= limit;
             if (!backHit && !frontHit) continue;
             t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
           }          else
           {
             if (!RayTriangleHit(probe, -itemFront, a, b, c, out var tr) ||
-                tr < 0.02f || tr > limit) continue;
+                tr < -0.1f || tr > limit) continue;
             t = tr;
           }
 
