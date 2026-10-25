@@ -561,6 +561,7 @@ namespace HousingUnlocked
       // highest for upward-snap detection.
       float lowestY = float.PositiveInfinity;
       float highestY = float.NegativeInfinity;
+      var ownColliders = new List<nint>();
       var instances = active->Instances.Instances;
       var size = (int)(instances.Last - instances.First);
       for (int i = 0; i < size; i++)
@@ -573,6 +574,7 @@ namespace HousingUnlocked
         var bgPart = (BgPartsLayoutInstance*)ci;
         var collider = bgPart->Collider;
         if (collider == null) continue;
+        ownColliders.Add((nint)collider);
         AABB worldBB = default;
         collider->GetWorldBB(&worldBB);
         if (worldBB.Min.Y < lowestY) lowestY = worldBB.Min.Y;
@@ -600,6 +602,9 @@ namespace HousingUnlocked
         var offset = downOffsets[oi];
         var downOrigin = new Vector3(pos.X, lowestY + offset, pos.Z);
         if (!RaycastFloorTopAll(downOrigin, downDir, 100f, out var downHit)) continue;
+        // A probe starting inside the held item hits its own collider at ~0 — ignore
+        // those so the item can never report itself as the floor.
+        if (ownColliders.Contains((nint)downHit.Object)) continue;
         var gap = downHit.Distance - offset + (pos.Y - lowestY);
         if (gap < 0f) gap = 0f;
         if (gap < floorGap) floorGap = gap;
@@ -669,16 +674,29 @@ namespace HousingUnlocked
         // above the item by casting down from well above it. If that surface sits
         // above the pivot, the item is sunk into the terrain/deck and the engine
         // pulls it up onto the surface — same rule as the indoor floor-above case,
-        // measured from the pivot. Hits inside the item's own vertical span (the
-        // held preview collider, if it is in the scene at all) are ignored.
-        var upOrigin = new Vector3(pos.X, pos.Y + 60f, pos.Z);
-        if (RaycastFloorTopAll(upOrigin, new Vector3(0f, -1f, 0f), 200f, out var upHit))
+        // measured from the pivot. The probes sit just outside the item's footprint
+        // (casting through the item would hit its own collider first) and start
+        // 10 yalms above the pivot so any surface above the item is in range.
+        var obUp = default(OrientedBounds);
+        active->GetOrientedBoundsImpl(&obUp);
+        var side = MathF.Max(obUp.HalfExtents.X, obUp.HalfExtents.Z) + 0.3f;
+        Span<Vector3> upOffsets = stackalloc Vector3[]
         {
+          new Vector3(side, 0f, 0f), new Vector3(-side, 0f, 0f),
+          new Vector3(0f, 0f, side), new Vector3(0f, 0f, -side),
+        };
+        for (var ui = 0; ui < upOffsets.Length; ui++)
+        {
+          var off = upOffsets[ui];
+          var upOrigin = new Vector3(pos.X + off.X, pos.Y + 10f, pos.Z + off.Z);
+          if (!RaycastFloorTopAll(upOrigin, new Vector3(0f, -1f, 0f), 100f, out var upHit)) continue;
+          if (ownColliders.Contains((nint)upHit.Object)) continue;
           var surfaceY = upOrigin.Y - upHit.Distance;
-          var insideItem = surfaceY >= lowestY - 0.1f && surfaceY <= highestY + 0.1f;
-          if (!insideItem && surfaceY > pos.Y + 0.02f)
+          if (surfaceY <= pos.Y + 0.02f) continue;
+          var gapUp = surfaceY - pos.Y;
+          if (gapUp < ceilingGap)
           {
-            ceilingGap = surfaceY - pos.Y;
+            ceilingGap = gapUp;
             foundUpwardSnap = true;
           }
         }
