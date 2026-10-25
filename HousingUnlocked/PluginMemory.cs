@@ -24,11 +24,11 @@ namespace HousingUnlocked
 {
   public class PluginMemory
   {
-    // Extra reach added to mesh-footprint-derived floor snap distances. The raw
-    // footprint/2 sits under the engine's real snap distance. Measured exactly on
-    // the Log Pillar: snaps at 0.371, floats at 0.372 — raw is 0.22188, so the
-    // total margin (this + the global snap margin) must land between the two.
-    private const float FloorSnapMargin = 0.0795f;
+    // Floor-snap distance is the item's raw shortest horizontal footprint / 2 —
+    // no extra margin. Measured exactly on the White Rectangular Partition:
+    // engine snaps at 0.1120, floats at 0.1130; its collision mesh shortest side
+    // is 0.2248 -> /2 = 0.1124. The formula value is treated as exact.
+    private const float FloorSnapMargin = 0f;
 
     private bool _isHousingOpen;
 
@@ -414,7 +414,7 @@ namespace HousingUnlocked
                 // real release distance (Log Pillar: mesh/2 = 0.2219, engine
                 // snapped up to ~0.24 — snapped at 0.179, floated at 0.241).
                 childThreshold = System.Math.Min(lbW, lbD) * 0.5f + FloorSnapMargin;
-                source = $"mesh.LocalBounds+{FloorSnapMargin:0.##} (Y {lb.Min.Y:0.###}..{lb.Max.Y:0.###})";
+                source = $"mesh.LocalBounds (Y {lb.Min.Y:0.###}..{lb.Max.Y:0.###})";
               }
             }
           }
@@ -445,11 +445,15 @@ namespace HousingUnlocked
 
       if (childrenWithThreshold > 0)
       {
+        // The footprint formula is treated as exact (measured against the engine's
+        // 0.112 boundary on the White Rect), so no global safety margin is added.
+        ActiveItemThresholdIsOverride = true;
         SnapThresholdDiagnostic = $"{firstSource} -> {minThreshold:0.######} ({childrenWithThreshold}/{totalChildren} children)";
         return minThreshold;
       }
 
       // Collider-less items: fixed floor snap distance (measured on the Log Pillar).
+      ActiveItemThresholdIsOverride = true;
       SnapThresholdDiagnostic = $"no usable colliders (children: {totalChildren}) -> default 0.2";
       return 0.2f;
     }
