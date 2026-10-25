@@ -65,11 +65,13 @@ namespace HousingUnlocked.Interface.Components
         ceilD = Memory.LastCeilingRaycastDistance;
       }
 
-      // Direction-aware: moving down targets the surface below; moving up targets
-      // the floor above; stationary falls back to whichever is closer.
-      var dir = Memory.VerticalMoveDirection;
-      var snapsUp = dir > 0 ? true : dir < 0 ? false : ceilD < floorD;
-      var directionalDistance = snapsUp ? ceilD : floorD;
+      // The engine resolves floor snaps when the housing menu is exited, and it
+      // checks the surface ABOVE the item first: if the gap up to a floor above
+      // is within the item's snap distance it snaps upward; only when that is
+      // out of range does it fall through to the floor below. Confirmed in-game:
+      // Morning Glory Plot (0.7898) snaps up at a 0.78 gap and down at 0.79;
+      // Summer Bonfire (1.1767) switches between 1.17 and 1.18. Drag direction
+      // does not influence the choice.
 
       // Authored thresholds are exact; the safety margin only applies to
       // formula-derived values (see PluginMemory).
@@ -82,6 +84,9 @@ namespace HousingUnlocked.Interface.Components
       var ceilInZone = isFloorSnapItem && ceilD > 0.02f &&
         SnapData.IsInFloorSnapZone(activeItemId, ceilD, effectiveThreshold);
       var inSnapZone = floorInZone || ceilInZone;
+      // The floor above wins whenever it is in range; the floor below is only
+      // the engine's choice when the surface above is out of reach.
+      var snapsUp = ceilInZone;
 
       // Gather every snap state once.
       if (Configuration.ShowItemSnapWarning && activeItemId != 0)
@@ -98,10 +103,10 @@ namespace HousingUnlocked.Interface.Components
       var wallName = string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName;
 
       var summary = "";
-      if (inSnapZone)
-        summary = !ceilInZone ? "floor"
-          : !floorInZone ? "floor above"
-          : snapsUp ? "floor above" : "floor";
+      if (ceilInZone)
+        summary = "floor above";
+      else if (floorInZone)
+        summary = "floor";
       if (Configuration.ShowItemSnapWarning && Memory.LastItemSnapHit)
         summary += (summary.Length > 0 ? " · " : "") + "item: " + itemName;
       if (Configuration.ShowTableSnapWarning && Memory.LastTableSnapHit)
@@ -271,7 +276,7 @@ namespace HousingUnlocked.Interface.Components
             ? "House wall: snaps on deselect."
             : "False wall: attaches when the housing interface closes.");
         }
-        ImGui.TextDisabled("Snap applies when you deselect.");
+        ImGui.TextDisabled("Snap applies when you exit the housing menu.");
       }
       ImGui.EndTooltip();
     }
