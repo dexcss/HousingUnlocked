@@ -358,9 +358,9 @@ namespace HousingUnlocked
       var active = HousingStructure->ActiveItem;
       if (active == null) { SnapThresholdDiagnostic = "no active item"; return 0f; }
 
-      // Primary floor-snap formula (Cutest/MakePlace-verified — this is what the
+      // Primary floor-snap formula (Cutest/MakePlace-verified ï¿½ this is what the
       // game uses): 1/2 of the shortest horizontal length of the item's VISUAL
-      // mesh box. 2D only — the height axis is excluded. In FFXIV axes that is
+      // mesh box. 2D only ï¿½ the height axis is excluded. In FFXIV axes that is
       // min(oriented X, oriented Z), i.e. the smaller horizontal half-extent of
       // the item's oriented bounds (rotation-independent).
       var ob = default(OrientedBounds);
@@ -368,7 +368,7 @@ namespace HousingUnlocked
       var obReach = MathF.Min(ob.HalfExtents.X, ob.HalfExtents.Z);
       if (obReach > 0f)
       {
-        ActiveItemThresholdIsOverride = true; // engine formula — exact, no margin
+        ActiveItemThresholdIsOverride = true; // engine formula ï¿½ exact, no margin
         SnapThresholdDiagnostic = $"oriented bounds -> {obReach:0.######} (extents {ob.HalfExtents.X:0.###}/{ob.HalfExtents.Y:0.###}/{ob.HalfExtents.Z:0.###})";
         return obReach;
       }
@@ -1200,7 +1200,7 @@ namespace HousingUnlocked
       var territoryLimit = capture;
       LastWallSnapThreshold = capture;
       // The item's world front (+Z local). Wall items only attach when their front
-      // points the same way as the wall surface — flipping the item 180° (front
+      // points the same way as the wall surface ï¿½ flipping the item 180ï¿½ (front
       // toward the wall) kills the snap for house walls and false walls alike.
       var itemFront = Vector3.Transform(Vector3.UnitZ, active->Transform.Rotation);
 
@@ -1426,14 +1426,10 @@ namespace HousingUnlocked
 
         foreach (var probe in probes)
         {
-          // Side eligibility (one-sided receivers only).
-          var side = Vector3.Dot(n, probe - a);
-          if (!acceptBothSides && side < -0.1f) continue; // allow slightly sunk items (pushed back out)
-
           float t;
           if (acceptBothSides)
           {
-            // Multi-sided receiver — MakePlace rule (Cutest, ported):
+            // Multi-sided receiver ï¿½ MakePlace rule (Cutest, ported):
             //   frontVector = rotation * (0, 100, 0)
             //   LineTraceSingleByChannel(position + frontVector, position - frontVector, WALL_CHANNEL)
             // A bidirectional line trace along the item's facing axis, 1.0 yalm each
@@ -1447,9 +1443,11 @@ namespace HousingUnlocked
             t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
           }          else
           {
-            if (!RayTriangleHit(probe, -itemFront, a, b, c, out var tr) ||
-                tr < -0.1f || tr > limit) continue;
-            t = tr;
+            // Single-face receiver (stage panels, house walls, ...): plain distance
+            // to the face from either side â€” the rule that validated all day.
+            var d = DistancePointTriangle(probe, a, b, c);
+            if (d > limit) continue;
+            t = d;
           }
 
           if (t < best)
