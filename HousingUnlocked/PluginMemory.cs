@@ -25,9 +25,10 @@ namespace HousingUnlocked
   public class PluginMemory
   {
     // Extra reach added to mesh-footprint-derived floor snap distances. The raw
-    // footprint/2 sits under the engine's real snap distance (Log Pillar: 0.2219
-    // computed; the engine keeps snapping in the last green band up to ~0.35).
-    private const float FloorSnapMargin = 0.06f;
+    // footprint/2 sits under the engine's real snap distance. Measured exactly on
+    // the Log Pillar: snaps at 0.371, floats at 0.372 — raw is 0.22188, so the
+    // total margin (this + the global snap margin) must land between the two.
+    private const float FloorSnapMargin = 0.0795f;
 
     private bool _isHousingOpen;
 
