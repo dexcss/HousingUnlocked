@@ -16,6 +16,8 @@ The FFXIV housing engine snaps items in three different ways. Housing Unlocked d
 
 All warnings support a configurable safety margin (default `0.07`) so the warning fires slightly **before** the engine's snap point.
 
+The floor check is **above-first**, matching the engine: if the gap up to a floor above is within the item's distance, the item will snap upward; the floor below only applies when no floor above is in range. Drag direction does not change the result. Snaps are resolved when the housing menu is exited.
+
 ## Commands
 
 All commands are `/hu` (you must be in rotate mode for item editing):
