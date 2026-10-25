@@ -702,16 +702,29 @@ namespace HousingUnlocked
         for (var ui = 0; ui < upOffsets.Length; ui++)
         {
           var off = upOffsets[ui];
-          var upOrigin = new Vector3(pos.X + off.X, pos.Y + 10f, pos.Z + off.Z);
-          if (!RaycastFloorTopAll(upOrigin, new Vector3(0f, -1f, 0f), 100f, out var upHit)) continue;
-          if (ownColliders.Contains((nint)upHit.Object)) continue;
-          var surfaceY = upOrigin.Y - upHit.Distance;
-          if (surfaceY <= pos.Y + 0.02f) continue;
-          var gapUp = surfaceY - pos.Y;
-          if (gapUp < ceilingGap)
+          // Enumerate every floor-top surface above the pivot, not just the
+          // highest one: a yard can stack a deck (19.0) under a roof (20.0), and
+          // the engine snaps to the NEAREST surface above (measured: bottom floor
+          // 19.0033 pulls the item up from 18.22 but not from 18.21). The first
+          // downward hit from +10 yalms is the highest surface; stepping below
+          // each hit walks the stack down to the pivot.
+          var probeY = pos.Y + 10f;
+          for (var iter = 0; iter < 8; iter++)
           {
-            ceilingGap = gapUp;
-            foundUpwardSnap = true;
+            var upOrigin = new Vector3(pos.X + off.X, probeY, pos.Z + off.Z);
+            if (!RaycastFloorTopAll(upOrigin, new Vector3(0f, -1f, 0f), 100f, out var upHit)) break;
+            var surfaceY = probeY - upHit.Distance;
+            if (surfaceY <= pos.Y + 0.02f) break; // reached the pivot; nothing above left
+            if (!ownColliders.Contains((nint)upHit.Object))
+            {
+              var gapUp = surfaceY - pos.Y;
+              if (gapUp < ceilingGap)
+              {
+                ceilingGap = gapUp;
+                foundUpwardSnap = true;
+              }
+            }
+            probeY = surfaceY - 0.02f;
           }
         }
       }
