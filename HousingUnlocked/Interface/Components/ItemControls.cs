@@ -73,8 +73,11 @@ namespace HousingUnlocked.Interface.Components
       var effectiveThreshold = perItemThreshold > 0f
         ? perItemThreshold + (Memory.ActiveItemThresholdIsOverride ? 0f : Configuration.SnapThreshold)
         : Configuration.SnapThreshold;
-      var inSnapZone = isFloorSnapItem && Memory.ActiveItemMovedSinceSelect &&
-        SnapData.IsInFloorSnapZone(activeItemId, directionalDistance, effectiveThreshold);
+      var floorInZone = isFloorSnapItem && floorD > 0.02f &&
+        SnapData.IsInFloorSnapZone(activeItemId, floorD, effectiveThreshold);
+      var ceilInZone = isFloorSnapItem && ceilD > 0.02f &&
+        SnapData.IsInFloorSnapZone(activeItemId, ceilD, effectiveThreshold);
+      var inSnapZone = floorInZone || ceilInZone;
 
       // Gather every snap state once.
       if (Configuration.ShowItemSnapWarning && activeItemId != 0)
@@ -92,7 +95,9 @@ namespace HousingUnlocked.Interface.Components
 
       var summary = "";
       if (inSnapZone)
-        summary = snapsUp ? "floor above" : "floor";
+        summary = !ceilInZone ? "floor"
+          : !floorInZone ? "floor above"
+          : snapsUp ? "floor above" : "floor";
       if (Configuration.ShowItemSnapWarning && Memory.LastItemSnapHit)
         summary += (summary.Length > 0 ? " · " : "") + "item: " + itemName;
       if (Configuration.ShowTableSnapWarning && Memory.LastTableSnapHit)
