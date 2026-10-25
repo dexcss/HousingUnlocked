@@ -405,16 +405,16 @@ namespace HousingUnlocked
             if (rootNode != null)
             {
               var lb = rootNode->LocalBounds;
-              var lbW = lb.Max.X - lb.Min.X;
-              var lbD = lb.Max.Z - lb.Min.Z;
+              // The collision mesh bounds are mesh-local — apply the child's scale.
+              // The Log Pillar's mesh is scaled ~1.67 (0.222 read vs the engine's
+              // measured 0.371); the White Rect is 1.0 (0.112 measured).
+              var childScale = bgPart->GetTransformImpl()->Scale;
+              var lbW = (lb.Max.X - lb.Min.X) * MathF.Abs(childScale.X);
+              var lbD = (lb.Max.Z - lb.Min.Z) * MathF.Abs(childScale.Z);
               if (lbW > 0f && lbD > 0f)
               {
-                // 1/2 of the shortest horizontal footprint + a small safety
-                // margin. The raw footprint/2 sits slightly under the engine's
-                // real release distance (Log Pillar: mesh/2 = 0.2219, engine
-                // snapped up to ~0.24 — snapped at 0.179, floated at 0.241).
                 childThreshold = System.Math.Min(lbW, lbD) * 0.5f + FloorSnapMargin;
-                source = $"mesh.LocalBounds (Y {lb.Min.Y:0.###}..{lb.Max.Y:0.###})";
+                source = $"mesh.LocalBounds x{childScale.X:0.###}/{childScale.Z:0.###} (Y {lb.Min.Y:0.###}..{lb.Max.Y:0.###})";
               }
             }
           }
@@ -487,8 +487,9 @@ namespace HousingUnlocked
           var rootNode = ((MeshPCB*)mesh)->RootNode;
           if (rootNode == null) continue;
           var lb = rootNode->LocalBounds;
-          var lbW = lb.Max.X - lb.Min.X;
-          var lbD = lb.Max.Z - lb.Min.Z;
+          var childScale = bgPart->GetTransformImpl()->Scale;
+          var lbW = (lb.Max.X - lb.Min.X) * MathF.Abs(childScale.X);
+          var lbD = (lb.Max.Z - lb.Min.Z) * MathF.Abs(childScale.Z);
           if (lbW > 0f && lbD > 0f)
             best = MathF.Min(best, MathF.Min(lbW, lbD) * 0.5f);
         }
