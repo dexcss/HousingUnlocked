@@ -1294,24 +1294,7 @@ namespace HousingUnlocked
 
       // Probe points: the item pivot (MakePlace traces from the actor position).
       var pos = active->Transform.Translation;
-      // Probe points: the pivot plus the item's TargetMarker children — the engine's
-      // wall attach points. Measured: with the item rotated, a Stage Panel keeps the
-      // engine's snap while a pivot-only distance reads green; the marker spread is
-      // the extra reach the engine uses. Markers sit on the item's mount plane, so
-      // they don't change the house-wall boundary.
       var probes = new List<Vector3> { pos };
-      {
-        var probeInstances = active->Instances.Instances;
-        var probeCount = (int)(probeInstances.Last - probeInstances.First);
-        for (var pi = 0; pi < probeCount && probes.Count < 32; pi++)
-        {
-          var probePtr = probeInstances.First[pi];
-          if (probePtr.Value == null) continue;
-          var probeInstance = probePtr.Value->Instance;
-          if (probeInstance == null || probeInstance->Id.Type != InstanceType.TargetMarker) continue;
-          probes.Add(probeInstance->GetTransformImpl()->Translation);
-        }
-      }
 
       // One-sided wall surface scan: walk placed receivers' wall-flagged collision
       // triangles in world space and measure each probe against the FRONT side only.
@@ -1616,8 +1599,13 @@ namespace HousingUnlocked
             t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
           }          else
           {
-            // Single-face receiver (stage panels, house walls, ...): plain distance
-            // to the face from either side — the rule that validated all day.
+            // Single-face receiver (stage panels, wall cabinets, ...): plain distance
+            // to the face — but only while the item still faces the wall surface.
+            // Measured: the engine refuses to attach a wall item rotated ~20°+ off
+            // the panel (MakePlace's facing rule: the item's front must point the
+            // same way as the wall surface). Without this gate a pure distance
+            // check keeps warning at every angle.
+            if (acceptBackSide && MathF.Abs(Vector3.Dot(itemFront, n)) < 0.966f) continue; // ~15°
             var d = DistancePointTriangle(probe, a, b, c);
             if (d > limit) continue;
             t = d;
