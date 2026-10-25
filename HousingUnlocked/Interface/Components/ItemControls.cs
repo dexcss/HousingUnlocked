@@ -51,7 +51,11 @@ namespace HousingUnlocked.Interface.Components
       }
 
       var activeItemId = Memory.GetActiveItemFFXIVId();
-      var isFloorSnapItem = activeItemId != 0 && SnapData.HasFloorSnap(activeItemId);
+      // Every item snaps down to the surface below it (Fox: the box formula applies
+      // to all non-wall items). The old hardcoded list covered only 655 of 2115
+      // items — e.g. the Morning Glory Plot got no floor warning at all. Wall-mounted
+      // items keep the wall warning and are excluded here as before.
+      var isFloorSnapItem = activeItemId != 0 && Memory.ActiveItemCategory != 15;
       var floorD = float.PositiveInfinity;
       var ceilD = float.PositiveInfinity;
       if (isFloorSnapItem)
