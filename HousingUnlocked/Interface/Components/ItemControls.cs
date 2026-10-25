@@ -85,8 +85,13 @@ namespace HousingUnlocked.Interface.Components
         SnapData.IsInFloorSnapZone(activeItemId, ceilD, effectiveThreshold);
       var inSnapZone = floorInZone || ceilInZone;
       // The floor above wins whenever it is in range; the floor below is only
-      // the engine's choice when the surface above is out of reach.
-      var snapsUp = ceilInZone;
+      // the engine's choice when the surface above is out of reach. Use the
+      // authored distance without the safety margin for this choice, so the
+      // direction flips exactly where the engine flips (0.79 for the plot,
+      // 1.18 for the bonfire); the margin only widens the early red warning.
+      var exactThreshold = perItemThreshold > 0f ? perItemThreshold : Configuration.SnapThreshold;
+      var snapsUp = isFloorSnapItem && ceilD > 0.02f &&
+        SnapData.IsInFloorSnapZone(activeItemId, ceilD, exactThreshold);
 
       // Gather every snap state once.
       if (Configuration.ShowItemSnapWarning && activeItemId != 0)
@@ -103,10 +108,12 @@ namespace HousingUnlocked.Interface.Components
       var wallName = string.IsNullOrEmpty(Memory.LastWallSnapTargetName) ? "wall surface" : Memory.LastWallSnapTargetName;
 
       var summary = "";
-      if (ceilInZone)
+      if (snapsUp)
         summary = "floor above";
       else if (floorInZone)
         summary = "floor";
+      else if (ceilInZone)
+        summary = "floor above";
       if (Configuration.ShowItemSnapWarning && Memory.LastItemSnapHit)
         summary += (summary.Length > 0 ? " · " : "") + "item: " + itemName;
       if (Configuration.ShowTableSnapWarning && Memory.LastTableSnapHit)
