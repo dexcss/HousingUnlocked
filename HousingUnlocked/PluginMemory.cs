@@ -1298,7 +1298,7 @@ namespace HousingUnlocked
             childM,
             probes, limit, cached.Name,
             ref bestFurn, ref bestFurnName, ref wallTris, ref hadWallTris,
-            itemFront, acceptBothSides: isMultiSided);
+            itemFront, acceptBackSide: true, acceptBothSides: isMultiSided);
         }
 
         if (bestFurn < beforeBestFurn)
