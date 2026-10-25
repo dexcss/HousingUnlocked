@@ -1294,7 +1294,24 @@ namespace HousingUnlocked
 
       // Probe points: the item pivot (MakePlace traces from the actor position).
       var pos = active->Transform.Translation;
+      // Probe points: the pivot plus the item's TargetMarker children — the engine's
+      // wall attach points. Measured: with the item rotated, a Stage Panel keeps the
+      // engine's snap while a pivot-only distance reads green; the marker spread is
+      // the extra reach the engine uses. Markers sit on the item's mount plane, so
+      // they don't change the house-wall boundary.
       var probes = new List<Vector3> { pos };
+      {
+        var probeInstances = active->Instances.Instances;
+        var probeCount = (int)(probeInstances.Last - probeInstances.First);
+        for (var pi = 0; pi < probeCount && probes.Count < 32; pi++)
+        {
+          var probePtr = probeInstances.First[pi];
+          if (probePtr.Value == null) continue;
+          var probeInstance = probePtr.Value->Instance;
+          if (probeInstance == null || probeInstance->Id.Type != InstanceType.TargetMarker) continue;
+          probes.Add(probeInstance->GetTransformImpl()->Translation);
+        }
+      }
 
       // One-sided wall surface scan: walk placed receivers' wall-flagged collision
       // triangles in world space and measure each probe against the FRONT side only.
@@ -1492,7 +1509,7 @@ namespace HousingUnlocked
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} (item back); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag}";
+      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} ({probes.Count} probes); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag}";
 
       if (furnHit || terrHit)
       {
