@@ -358,20 +358,12 @@ namespace HousingUnlocked
       var active = HousingStructure->ActiveItem;
       if (active == null) { SnapThresholdDiagnostic = "no active item"; return 0f; }
 
-      // Primary floor-snap formula (Cutest/MakePlace-verified): 1/2 of the shortest
-      // horizontal length of the item's VISUAL mesh box (2D, height excluded) —
-      // measured per BgPart mesh (the group-level bounds include marker children
-      // that inflate it: the Log Pillar read 1.04 wide vs its ~0.45 mesh).
-      if (GetActiveItemWorldBounds() is { } vb)
-      {
-        var meshReach = MathF.Min(vb.Max.X - vb.Min.X, vb.Max.Z - vb.Min.Z) * 0.5f;
-        if (meshReach > 0f)
-        {
-          ActiveItemThresholdIsOverride = true; // engine formula — exact, no margin
-          SnapThresholdDiagnostic = $"visual mesh bounds -> {meshReach:0.######} (size {(vb.Max.X - vb.Min.X):0.###}x{(vb.Max.Z - vb.Min.Z):0.###})";
-          return meshReach;
-        }
-      }
+      // Floor snap distance:
+      //  1. authored SphereCastRange (handled by the caller — exact)
+      //  2. collider footprint / 2 (validated: Grassy Rug 2.0 vs 2.06)
+      //  3. collider-less items (glass, bag, Log Pillar): the game uses a small
+      //     fixed distance — measured on the Log Pillar: snapped at 0.179,
+      //     floated at 0.244 (the visual-box formula does NOT apply to these).
       var instances = active->Instances.Instances;
       var size = (int)(instances.Last - instances.First);
       var totalChildren = size;
@@ -447,8 +439,9 @@ namespace HousingUnlocked
         return minThreshold;
       }
 
-      SnapThresholdDiagnostic = $"no usable colliders (children: {totalChildren})";
-      return 0f;
+      // Collider-less items: fixed floor snap distance (measured on the Log Pillar).
+      SnapThresholdDiagnostic = $"no usable colliders (children: {totalChildren}) -> default 0.2";
+      return 0.2f;
     }
 
     /// <summary>
@@ -877,9 +870,14 @@ namespace HousingUnlocked
       //   0.74 Ã— the item's floor snap distance (min horizontal half-extent of
       //   the visual box) + 8 mm. Fits: glass snap 0.041/float 0.05,
       //   bag snap 0.080/float 0.085, basket snap 0.350/float 0.36.
-      var floorReach = ActiveItemSnapThreshold > 0f
-        ? ActiveItemSnapThreshold
-        : System.Math.Min(bbMax.X - bbMin.X, bbMax.Z - bbMin.Z) * 0.5f;
+      // Tabletop reach calibrated on the Used Banquet Table (glass/bag/basket
+      // boundary tests): the engine allows a gap above the surface of
+      //   0.74 x the item's min horizontal half-extent (oriented bounds) + 8 mm.
+      // Fits: glass snap 0.041/float 0.05, bag snap 0.080/float 0.085,
+      // basket snap 0.350/float 0.36.
+      var ob = default(OrientedBounds);
+      active->GetOrientedBoundsImpl(&ob);
+      var floorReach = System.Math.Min(ob.HalfExtents.X, ob.HalfExtents.Z);
       var reach = floorReach * 0.74f + 0.008f;
 
       var candidates = GetNearbyTableSurfaces();
