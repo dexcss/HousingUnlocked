@@ -128,7 +128,9 @@ namespace HousingUnlocked
     /// </remarks>
     public static bool IsInFloorSnapZone(uint itemId, float distanceToFloor, float threshold)
     {
-      if (itemId == 0 || !HasFloorSnap(itemId)) return false;
+      // Eligibility (floor-snap category) is decided by the caller; this used to
+      // consult the stale 655-item list and silently excluded ~1400 items.
+      if (itemId == 0 || threshold <= 0f) return false;
       // Small tolerance — float math frequently shows e.g. 0.10000001 vs 0.0999999
       // for values typed as 0.1, which would otherwise cause boundary flicker.
       // Kept at 0.02 mm so the exact model-box boundaries reproduce to the

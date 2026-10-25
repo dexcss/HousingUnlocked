@@ -565,15 +565,27 @@ namespace HousingUnlocked
       const float Epsilon = 0.001f;
 
       // === Downward ray: distance to floor below the item ===
-      // Raycast handles all surfaces below correctly (floors are upward-facing
-      // and visible to downward rays, and so are tabletops, stairs, etc.).
-      var downOrigin = new Vector3(pos.X, lowestY - Epsilon, pos.Z);
+      // Start 1 mm below the item's lowest point so the item's own collider cannot
+      // block the ray. If that misses, the base is resting on (or sunk into) the
+      // surface — common for outdoor plots sitting on the terrain — so retry from
+      // just above the lowest point, where the ray can cross the surface.
       var downDir = new Vector3(0f, -1f, 0f);
       float floorGap = float.PositiveInfinity;
-      if (BGCollisionModule.RaycastMaterialFilter(downOrigin, downDir, out var downHit, 100f))
+      var gotFloor = false;
+      Span<float> downOffsets = stackalloc float[] { -Epsilon, 0.01f, 0.1f };
+      for (var oi = 0; oi < downOffsets.Length; oi++)
       {
-        floorGap = downHit.Distance + (pos.Y - lowestY) + Epsilon;
-        if (floorGap < 0f) floorGap = 0f;
+        var offset = downOffsets[oi];
+        var downOrigin = new Vector3(pos.X, lowestY + offset, pos.Z);
+        if (!BGCollisionModule.RaycastMaterialFilter(downOrigin, downDir, out var downHit, 100f)) continue;
+        var gap = downHit.Distance - offset + (pos.Y - lowestY);
+        if (gap < 0f) gap = 0f;
+        floorGap = gap;
+        gotFloor = true;
+        break;
+      }
+      if (gotFloor)
+      {
         LastFloorRaycastHit = true;
         LastFloorRaycastDistance = floorGap;
       }
