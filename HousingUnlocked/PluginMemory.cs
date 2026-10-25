@@ -320,6 +320,8 @@ namespace HousingUnlocked
     // HousingItemCategory of the cached active item (15 = wall-mounted, per the
     // HousingFurniture/HousingYardObject sheets).
     private uint _cachedActiveItemCategory = 0;
+    private uint _cachedActiveItemModelKey = 0;
+    private bool _cachedActiveItemIsOutdoor = false;
 
     /// <summary>HousingItemCategory of the active item (78=tabletop item, 15=wall-mounted item).</summary>
     public uint ActiveItemCategory => _cachedActiveItemCategory;
@@ -941,12 +943,9 @@ namespace HousingUnlocked
       active->GetOrientedBoundsImpl(&ob);
       var floorReach = System.Math.Min(ob.HalfExtents.X, ob.HalfExtents.Z);
 
-      // Tabletop reach follows the same per-item rule as everything else: the
-      // authored SphereCastRange when present, otherwise the collision footprint.
-      // Collider-less items fall back to the calibrated 0.74 x visual half-extent.
-      // +2 cm so the warning leads the engine's drag snap (items were snapping
-      // while the status still read green).
-      const float tableMargin = 0.02f;
+      // Tabletop reach follows the same box formula as the floor (Fox's rule):
+      // the game's model bounding box, min(X, Z) / 2 — verified against the engine
+      // (grocery bag 0.0815 vs measured 0.080/0.085; wine glass 0.0471 vs 0.041/0.050).
       float reach;
       string reachSrc;
       if (ActiveItemSphereCastSource is "runtime" or "sgb table")
@@ -956,16 +955,25 @@ namespace HousingUnlocked
       }
       else
       {
-        var rawFootprint = ComputeActiveItemRawFootprintHalf();
-        if (rawFootprint > 0f)
+        var modelFloor = ModelFloorData.Get(_cachedActiveItemModelKey, _cachedActiveItemIsOutdoor);
+        if (modelFloor > 0f)
         {
-          reach = rawFootprint + tableMargin;
-          reachSrc = "mesh footprint";
+          reach = modelFloor;
+          reachSrc = "model box";
         }
         else
         {
-          reach = floorReach * 0.74f + 0.008f + tableMargin;
-          reachSrc = "visual 0.74";
+          var rawFootprint = ComputeActiveItemRawFootprintHalf();
+          if (rawFootprint > 0f)
+          {
+            reach = rawFootprint + 0.02f;
+            reachSrc = "mesh footprint";
+          }
+          else
+          {
+            reach = floorReach * 0.74f + 0.008f + 0.02f;
+            reachSrc = "visual 0.74";
+          }
         }
       }
 
@@ -1872,11 +1880,15 @@ namespace HousingUnlocked
         {
           _cachedActiveItemId = furniture.Item.Value.RowId;
           _cachedActiveItemCategory = (uint)furniture.HousingItemCategory;
+          _cachedActiveItemModelKey = furniture.ModelKey;
+          _cachedActiveItemIsOutdoor = false;
         }
         else if (Plugin.TryGetYardObject(furnitureRowId, out var yard))
         {
           _cachedActiveItemId = yard.Item.Value.RowId;
           _cachedActiveItemCategory = (uint)yard.HousingItemCategory;
+          _cachedActiveItemModelKey = yard.ModelKey;
+          _cachedActiveItemIsOutdoor = true;
         }
         _lastActiveItemIdPost = _cachedActiveItemId; // kept through deselect for post-snap logging
         break;
@@ -1893,6 +1905,7 @@ namespace HousingUnlocked
       // must NOT be added to them. Only the approximate formula (4) gets the
       // safety margin (it can underestimate, e.g. Grassy Rug).
       {        var runtimeRange = GetSphereCastRangeOverride(active);
+        var modelFloor = ModelFloorData.Get(_cachedActiveItemModelKey, _cachedActiveItemIsOutdoor);
         if (runtimeRange.HasValue)
         {
           ActiveItemSnapThreshold = runtimeRange.Value;
@@ -1906,6 +1919,17 @@ namespace HousingUnlocked
           ActiveItemThresholdIsOverride = true;
           ActiveItemSphereCastSource = "sgb table";
           SnapThresholdDiagnostic = $"SphereCastRange override (sgb table) -> {tableRange:0.####}";
+        }
+        else if ((modelFloor = ModelFloorData.Get(_cachedActiveItemModelKey, _cachedActiveItemIsOutdoor)) > 0f)
+        {
+          // Fox's box formula, taken from the game's own model bounding box:
+          // min(box X, box Z) / 2. Verified against the engine's exact boundaries
+          // (Log Pillar 0.3716 vs snap 0.371 / float 0.372; White Rect 0.11292 vs
+          // 0.112 / 0.113). The formula is exact — no safety margin.
+          ActiveItemSnapThreshold = modelFloor;
+          ActiveItemThresholdIsOverride = true;
+          ActiveItemSphereCastSource = "(none)";
+          SnapThresholdDiagnostic = $"model box -> {modelFloor:0.#####} (m{_cachedActiveItemModelKey})";
         }
         else if (_cachedActiveItemCategory == 15)
         {

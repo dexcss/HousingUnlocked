@@ -131,9 +131,9 @@ namespace HousingUnlocked
       if (itemId == 0 || !HasFloorSnap(itemId)) return false;
       // Small tolerance — float math frequently shows e.g. 0.10000001 vs 0.0999999
       // for values typed as 0.1, which would otherwise cause boundary flicker.
-      // Kept at 0.1 mm so an exact measured boundary (e.g. 0.371 red / 0.372
-      // green) is reproduced to the millimetre.
-      const float Epsilon = 0.0001f;
+      // Kept at 0.02 mm so the exact model-box boundaries reproduce to the
+      // millimetre (White Rect 0.112 red / 0.113 green; Log Pillar 0.371 / 0.372).
+      const float Epsilon = 0.00002f;
       return distanceToFloor <= threshold + Epsilon;
     }
   }
