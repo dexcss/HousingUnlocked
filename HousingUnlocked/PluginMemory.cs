@@ -455,6 +455,53 @@ namespace HousingUnlocked
     }
 
     /// <summary>
+    /// Raw minimum horizontal footprint half-extent from the active item's colliders
+    /// (mesh LocalBounds or analytic Scale), without any safety margin.
+    /// </summary>
+    /// <returns>The footprint half-extent, or 0 when the item has no usable colliders.</returns>
+    private unsafe float ComputeActiveItemRawFootprintHalf()
+    {
+      if (HousingStructure == null || HousingStructure->ActiveItem == null) return 0f;
+      var active = HousingStructure->ActiveItem;
+      var instances = active->Instances.Instances;
+      var size = (int)(instances.Last - instances.First);
+      var best = float.PositiveInfinity;
+      for (int i = 0; i < size; i++)
+      {
+        var childPtr = instances.First[i];
+        if (childPtr.Value == null) continue;
+        var childInstance = childPtr.Value->Instance;
+        if (childInstance == null || childInstance->Id.Type != InstanceType.BgPart) continue;
+        var bgPart = (BgPartsLayoutInstance*)childInstance;
+        var collider = bgPart->Collider;
+        if (collider == null) continue;
+        var colliderType = collider->GetColliderType();
+        if (colliderType == ColliderType.Mesh)
+        {
+          var mesh = ((ColliderMesh*)collider)->Mesh;
+          if (mesh == null) continue;
+          var rootNode = ((MeshPCB*)mesh)->RootNode;
+          if (rootNode == null) continue;
+          var lb = rootNode->LocalBounds;
+          var lbW = lb.Max.X - lb.Min.X;
+          var lbD = lb.Max.Z - lb.Min.Z;
+          if (lbW > 0f && lbD > 0f)
+            best = MathF.Min(best, MathF.Min(lbW, lbD) * 0.5f);
+        }
+        else if (colliderType == ColliderType.Box
+              || colliderType == ColliderType.Cylinder
+              || colliderType == ColliderType.Sphere
+              || colliderType == ColliderType.Plane)
+        {
+          var scale = *(Vector3*)((byte*)collider + 0xD8);
+          if (scale.X > 0f && scale.Z > 0f)
+            best = MathF.Min(best, MathF.Min(scale.X, scale.Z));
+        }
+      }
+      return float.IsInfinity(best) ? 0f : best;
+    }
+
+    /// <summary>
     /// Casts a ray straight down from the active item's position and returns
     /// the distance to the nearest collision surface. Used by snap detection
     /// to know whether the item is close enough to the ground to be snapped.
@@ -888,7 +935,34 @@ namespace HousingUnlocked
       var ob = default(OrientedBounds);
       active->GetOrientedBoundsImpl(&ob);
       var floorReach = System.Math.Min(ob.HalfExtents.X, ob.HalfExtents.Z);
-      var reach = floorReach * 0.74f + 0.008f;
+
+      // Tabletop reach follows the same per-item rule as everything else: the
+      // authored SphereCastRange when present, otherwise the collision footprint.
+      // Collider-less items fall back to the calibrated 0.74 x visual half-extent.
+      // +2 cm so the warning leads the engine's drag snap (items were snapping
+      // while the status still read green).
+      const float tableMargin = 0.02f;
+      float reach;
+      string reachSrc;
+      if (ActiveItemSphereCastSource is "runtime" or "sgb table")
+      {
+        reach = ActiveItemSnapThreshold;
+        reachSrc = "scr";
+      }
+      else
+      {
+        var rawFootprint = ComputeActiveItemRawFootprintHalf();
+        if (rawFootprint > 0f)
+        {
+          reach = rawFootprint + tableMargin;
+          reachSrc = "mesh footprint";
+        }
+        else
+        {
+          reach = floorReach * 0.74f + 0.008f + tableMargin;
+          reachSrc = "visual 0.74";
+        }
+      }
 
       var candidates = GetNearbyTableSurfaces();
       float best = float.PositiveInfinity;
@@ -925,7 +999,7 @@ namespace HousingUnlocked
       }
 
       TableSnapDiagnostic = $"{candidates.Count} TableTop receiver(s), item Y [{bbMin.Y:0.###}..{bbMax.Y:0.###}] " +
-        $"XZ {bbMax.X - bbMin.X:0.###}x{bbMax.Z - bbMin.Z:0.###}, gap {(float.IsInfinity(nearestGap) ? float.NaN : nearestGap):0.###}, reach {reach:0.###}{(sourceNote.Length > 0 ? ", " + sourceNote : "")}";
+        $"XZ {bbMax.X - bbMin.X:0.###}x{bbMax.Z - bbMin.Z:0.###}, gap {(float.IsInfinity(nearestGap) ? float.NaN : nearestGap):0.###}, reach {reach:0.###} ({reachSrc}){(sourceNote.Length > 0 ? ", " + sourceNote : "")}";
 
       if (best != float.PositiveInfinity)
       {
