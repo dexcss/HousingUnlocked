@@ -25,9 +25,9 @@ namespace HousingUnlocked
   public class PluginMemory
   {
     // Extra reach added to mesh-footprint-derived floor snap distances. The raw
-    // footprint/2 is a couple of centimetres under the engine's real release
-    // distance (Log Pillar: 0.2219 computed, engine snapped up to ~0.24).
-    private const float FloorSnapMargin = 0.02f;
+    // footprint/2 sits under the engine's real release distance (Log Pillar:
+    // 0.2219 computed, engine snaps up to ~0.32 measured in green-zone tests).
+    private const float FloorSnapMargin = 0.04f;
 
     private bool _isHousingOpen;
 
@@ -1115,6 +1115,7 @@ namespace HousingUnlocked
       _territoryWallCacheBuilt = DateTime.Now;
 
       int scanned = 0, walls = 0;
+      var wallBBs = new System.Text.StringBuilder();
       if (lm == null || lm->InitState != 7)
       {
         // Do not cache the failure for 10 minutes: retry on the next check.
@@ -1155,11 +1156,12 @@ namespace HousingUnlocked
           AABB bb = default;
           collider->GetWorldBB(&bb);
           _territoryWallCache.Add(((nint)bgPart, bb));
+          wallBBs.Append($"[{bb.Min.X:0.##},{bb.Min.Y:0.##},{bb.Min.Z:0.##}]-[{bb.Max.X:0.##},{bb.Max.Y:0.##},{bb.Max.Z:0.##}] ");
           walls++;
         }
       }
       _territoryWallCacheDeep = allowDeep;
-      TerritoryWallCacheDiagnostic = $"{scanned} bgparts scanned, {walls} wall surfaces cached{(allowDeep ? " (deep)" : "")} at {DateTime.Now:HH:mm:ss}";
+      TerritoryWallCacheDiagnostic = $"{scanned} bgparts scanned, {walls} wall surfaces cached{(allowDeep ? " (deep)" : "")} at {DateTime.Now:HH:mm:ss} {wallBBs}";
       SnapLogger.Event("wallcache", TerritoryWallCacheDiagnostic);
     }
 
@@ -1379,37 +1381,54 @@ namespace HousingUnlocked
       if (_territoryWallCache.Count == 0)
         EnsureTerritoryWallCache(allowDeep: true);
 
+      var terrDiag = new System.Text.StringBuilder();
       foreach (var (inst, bb) in _territoryWallCache)
       {
         var near = false;
         var contained = false;
+        var bbDist = float.PositiveInfinity;
         foreach (var p in probes)
         {
           if (ContainsPoint(bb, p)) { contained = true; }
-          if (DistancePointToAABB(p, bb) <= 2.5f) { near = true; break; }
+          bbDist = MathF.Min(bbDist, DistancePointToAABB(p, bb));
+          if (bbDist <= 2.5f) { near = true; break; }
         }
-        if (!near && !contained) continue;
+        if (!near && !contained)
+        {
+          terrDiag.Append($"[bb={bbDist:0.##} skip]");
+          continue;
+        }
 
         var m = BuildMatrix(*((BgPartsLayoutInstance*)inst)->GetTransformImpl());
         var dummy = false;
+        // Per-wall score: scoring straight into bestTerr lets a later wall's
+        // containment override an earlier wall's real triangle hit (and vice versa).
+        var wallBest = float.PositiveInfinity;
+        var wallName = "";
         // House walls: distance to the attachable face only — no half-space test,
         // so an item behind the plane (inside the wall) still snaps forward onto it.
-        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, territoryLimit, "house wall", ref bestTerr, ref bestTerrName, ref wallTris, ref dummy, itemFront, acceptBothSides: true);
+        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, territoryLimit, "house wall", ref wallBest, ref wallName, ref wallTris, ref dummy, itemFront, acceptBothSides: true);
+        var triBest = wallBest;
         // Sunk inside the wall itself: the engine pushes the item back out to the
-        // room side at any depth (measured: the lantern 1.06 inside the west wall
-        // pushed out 1.27). The 1.0 ray capture misses deep items, so detect
+        // room side at any depth. The 1.0 ray capture misses deep items, so detect
         // containment directly.
-        if (contained && bestTerr > 0f)
+        if (contained && wallBest > 0f)
         {
-          bestTerr = 0f;
-          bestTerrName = "house wall";
+          wallBest = 0f;
+          wallName = "house wall";
           dummy = true;
+        }
+        terrDiag.Append($"[bb={bbDist:0.##} in={(contained ? 1 : 0)} tri={(float.IsInfinity(triBest) ? "-" : triBest.ToString("0.###"))}]");
+        if (wallBest < bestTerr)
+        {
+          bestTerr = wallBest;
+          bestTerrName = wallName;
         }
       }
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} (item back); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
+      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} (item back); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag}";
 
       if (furnHit || terrHit)
       {
