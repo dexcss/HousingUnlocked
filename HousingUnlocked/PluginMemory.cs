@@ -1220,6 +1220,16 @@ namespace HousingUnlocked
       var usedAabbFallback = false;
       AABB? bestFurnBB = null;
       var bestFurnBBName = "";
+      // Per-class bests: multi-face receivers outrank single-face false walls
+      // (measured: lantern between a Stage Panel and a White Rect snaps to the
+      // White Rect), which outrank house walls (handled via terrHit below).
+      float bestMulti = float.PositiveInfinity;
+      string bestMultiName = "";
+      AABB? bestMultiBB = null;
+      float bestSingle = float.PositiveInfinity;
+      string bestSingleName = "";
+      AABB? bestSingleBB = null;
+      var furnClass = "";
 
       for (var i = 0; i < 600; i++)
       {
@@ -1257,7 +1267,10 @@ namespace HousingUnlocked
         var itemInstances = group->Instances.Instances;
         var itemSize = (int)(itemInstances.Last - itemInstances.First);
         var hadWallTris = false;
-        var beforeBestFurn = bestFurn;
+        var beforeItemBest = float.PositiveInfinity;
+        var itemBest = float.PositiveInfinity;
+        var itemName = "";
+        AABB? itemBB = null;
 
         for (int c = 0; c < itemSize; c++)
         {
@@ -1276,17 +1289,17 @@ namespace HousingUnlocked
             (BgPartsLayoutInstance*)ci,
             childM,
             probes, limit, cached.Name,
-            ref bestFurn, ref bestFurnName, ref wallTris, ref hadWallTris,
+            ref itemBest, ref itemName, ref wallTris, ref hadWallTris,
             itemFront, acceptBackSide: true, acceptBothSides: isMultiSided);
         }
 
-        if (bestFurn < beforeBestFurn)
+        if (itemBest < beforeItemBest)
         {
           var hitUnion = GetItemColliderUnion(group);
           if (hitUnion.HasValue)
           {
-            bestFurnBB = hitUnion.Value;
-            bestFurnBBName = cached.Name;
+            itemBB = hitUnion.Value;
+            itemName = cached.Name;
           }
         }
         // Embedded-census fallback: known wall receiver, but no wall triangles were
@@ -1302,14 +1315,51 @@ namespace HousingUnlocked
             foreach (var p in probes)
             {
               var d = DistancePointToAABB(p, union.Value);
-              if (d < bestFurn)
+              if (d < itemBest)
               {
-                bestFurn = d;
-                bestFurnName = cached.Name;
+                itemBest = d;
+                itemName = cached.Name;
               }
             }
           }
         }
+
+        // Merge this item's best into its receiver class.
+        if (itemBest < float.PositiveInfinity)
+        {
+          if (isMultiSided)
+          {
+            if (itemBest < bestMulti) { bestMulti = itemBest; bestMultiName = itemName; bestMultiBB = itemBB; }
+          }
+          else if (itemBest < bestSingle)
+          {
+            bestSingle = itemBest;
+            bestSingleName = itemName;
+            bestSingleBB = itemBB;
+          }
+        }
+      }
+
+      // Priority (measured): multi-face receivers > single-face false walls >
+      // house walls. Distance does not decide between receiver classes.
+      if (bestMulti <= limit)
+      {
+        bestFurn = bestMulti;
+        bestFurnName = bestMultiName;
+        bestFurnBB = bestMultiBB;
+        furnClass = "multi-face";
+      }
+      else if (bestSingle <= limit)
+      {
+        bestFurn = bestSingle;
+        bestFurnName = bestSingleName;
+        bestFurnBB = bestSingleBB;
+        furnClass = "single-face";
+      }
+      else
+      {
+        bestFurn = float.PositiveInfinity;
+        bestFurnName = "";
       }
 
       // Static territory walls (the house's own walls): cached once per zone and
@@ -1336,7 +1386,7 @@ namespace HousingUnlocked
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} (item back); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
+      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} (item back); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)})";
 
       if (furnHit || terrHit)
       {
