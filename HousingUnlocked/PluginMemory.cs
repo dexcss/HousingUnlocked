@@ -358,21 +358,20 @@ namespace HousingUnlocked
       var active = HousingStructure->ActiveItem;
       if (active == null) { SnapThresholdDiagnostic = "no active item"; return 0f; }
 
-      // Primary floor-snap formula (Cutest/MakePlace-verified ï¿½ this is what the
-      // game uses): 1/2 of the shortest horizontal length of the item's VISUAL
-      // mesh box. 2D only ï¿½ the height axis is excluded. In FFXIV axes that is
-      // min(oriented X, oriented Z), i.e. the smaller horizontal half-extent of
-      // the item's oriented bounds (rotation-independent).
-      var ob = default(OrientedBounds);
-      active->GetOrientedBoundsImpl(&ob);
-      var obReach = MathF.Min(ob.HalfExtents.X, ob.HalfExtents.Z);
-      if (obReach > 0f)
+      // Primary floor-snap formula (Cutest/MakePlace-verified): 1/2 of the shortest
+      // horizontal length of the item's VISUAL mesh box (2D, height excluded) —
+      // measured per BgPart mesh (the group-level bounds include marker children
+      // that inflate it: the Log Pillar read 1.04 wide vs its ~0.45 mesh).
+      if (GetActiveItemWorldBounds() is { } vb)
       {
-        ActiveItemThresholdIsOverride = true; // engine formula ï¿½ exact, no margin
-        SnapThresholdDiagnostic = $"oriented bounds -> {obReach:0.######} (extents {ob.HalfExtents.X:0.###}/{ob.HalfExtents.Y:0.###}/{ob.HalfExtents.Z:0.###})";
-        return obReach;
+        var meshReach = MathF.Min(vb.Max.X - vb.Min.X, vb.Max.Z - vb.Min.Z) * 0.5f;
+        if (meshReach > 0f)
+        {
+          ActiveItemThresholdIsOverride = true; // engine formula — exact, no margin
+          SnapThresholdDiagnostic = $"visual mesh bounds -> {meshReach:0.######} (size {(vb.Max.X - vb.Min.X):0.###}x{(vb.Max.Z - vb.Min.Z):0.###})";
+          return meshReach;
+        }
       }
-
       var instances = active->Instances.Instances;
       var size = (int)(instances.Last - instances.First);
       var totalChildren = size;
@@ -1611,15 +1610,9 @@ namespace HousingUnlocked
 
       var active = HousingStructure->ActiveItem;
 
-      // Preferred: the engine's own axis-aligned visual bounds. Unlike collider AABBs
-      // these exist for collider-less tabletop decorations and match what the engine
-      // itself considers the item's body.
-      var visual = default(AxisAlignedBounds);
-      active->GetAxisAlignedBoundsImpl(&visual);
-      if (visual.Max.X > visual.Min.X && visual.Max.Y > visual.Min.Y && visual.Max.Z > visual.Min.Z)
-        return (visual.Min, visual.Max);
-
-      // Fallback: union of the child collider world bounds.
+      // Union of the child BgPart VISUAL bounds (render meshes) â€” the group-level
+      // bounds include marker/effect children that inflate the box (the Log Pillar
+      // read 1.04 wide vs its ~0.45 mesh, which broke the floor snap threshold).
       var instances = active->Instances.Instances;
       var size = (int)(instances.Last - instances.First);
       Vector3 min = new(float.MaxValue), max = new(float.MinValue);
@@ -1631,6 +1624,17 @@ namespace HousingUnlocked
         var ci = childPtr.Value->Instance;
         if (ci == null || ci->Id.Type != InstanceType.BgPart) continue;
         var bgPart = (BgPartsLayoutInstance*)ci;
+
+        var childAabb = default(AxisAlignedBounds);
+        bgPart->GetAxisAlignedBoundsImpl(&childAabb);
+        if (childAabb.Max.X > childAabb.Min.X && childAabb.Max.Y > childAabb.Min.Y && childAabb.Max.Z > childAabb.Min.Z)
+        {
+          min = Vector3.Min(min, childAabb.Min);
+          max = Vector3.Max(max, childAabb.Max);
+          any = true;
+          continue;
+        }
+
         if (bgPart->Collider == null) continue;
         AABB bb = default;
         bgPart->Collider->GetWorldBB(&bb);
