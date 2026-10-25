@@ -588,27 +588,41 @@ namespace HousingUnlocked
       const float Epsilon = 0.001f;
 
       // === Downward ray: distance to floor below the item ===
-      // Start 1 mm below the item's lowest point so the item's own collider cannot
-      // block the ray, then also probe from just above it. A resting base can sit
-      // *inside* the top surface, in which case the lower probe slips through and
-      // hits a floor far below (the ward-connector floor that runs under the plot,
-      // ~19 yalms down). Use the NEAREST surface across all probes, never the first.
+      // Sample the whole footprint, not just the pivot: the game rests an item on
+      // the highest floor-top point under its base, so on the sloped yard land the
+      // pivot can read a very different height than the contact point. Each sample
+      // also probes from just below and just above the base (a resting base can sit
+      // inside the surface, where the lower probe slips through to the ward-connector
+      // floor far below). Nearest surface across every sample wins.
+      var obFloor = default(OrientedBounds);
+      active->GetOrientedBoundsImpl(&obFloor);
+      var footX = MathF.Max(0.05f, obFloor.HalfExtents.X * 0.7f);
+      var footZ = MathF.Max(0.05f, obFloor.HalfExtents.Z * 0.7f);
       var downDir = new Vector3(0f, -1f, 0f);
       float floorGap = float.PositiveInfinity;
       var gotFloor = false;
-      Span<float> downOffsets = stackalloc float[] { -Epsilon, 0.01f, 0.1f };
-      for (var oi = 0; oi < downOffsets.Length; oi++)
+      Span<Vector3> footOffsets = stackalloc Vector3[]
       {
-        var offset = downOffsets[oi];
-        var downOrigin = new Vector3(pos.X, lowestY + offset, pos.Z);
-        if (!RaycastFloorTopAll(downOrigin, downDir, 100f, out var downHit)) continue;
-        // A probe starting inside the held item hits its own collider at ~0 — ignore
-        // those so the item can never report itself as the floor.
-        if (ownColliders.Contains((nint)downHit.Object)) continue;
-        var gap = downHit.Distance - offset + (pos.Y - lowestY);
-        if (gap < 0f) gap = 0f;
-        if (gap < floorGap) floorGap = gap;
-        gotFloor = true;
+        Vector3.Zero, new Vector3(footX, 0f, footZ), new Vector3(-footX, 0f, footZ),
+        new Vector3(footX, 0f, -footZ), new Vector3(-footX, 0f, -footZ),
+      };
+      Span<float> downOffsets = stackalloc float[] { -Epsilon, 0.01f, 0.1f };
+      for (var fi = 0; fi < footOffsets.Length; fi++)
+      {
+        var fo = footOffsets[fi];
+        for (var oi = 0; oi < downOffsets.Length; oi++)
+        {
+          var offset = downOffsets[oi];
+          var downOrigin = new Vector3(pos.X + fo.X, lowestY + offset, pos.Z + fo.Z);
+          if (!RaycastFloorTopAll(downOrigin, downDir, 100f, out var downHit)) continue;
+          // A probe starting inside the held item hits its own collider at ~0 — ignore
+          // those so the item can never report itself as the floor.
+          if (ownColliders.Contains((nint)downHit.Object)) continue;
+          var gap = downHit.Distance - offset + (pos.Y - lowestY);
+          if (gap < 0f) gap = 0f;
+          if (gap < floorGap) floorGap = gap;
+          gotFloor = true;
+        }
       }
       if (gotFloor)
       {
