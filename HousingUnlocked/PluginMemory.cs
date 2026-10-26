@@ -1639,7 +1639,7 @@ namespace HousingUnlocked
               bestMulti = itemBest; bestMultiName = itemName; bestMultiBB = itemBB;
               winN = rGeomN; winP = rGeomP; winT = rGeomT; winSide = rGeomSide;
               winSigned = rGeomSigned; winPerp = rGeomPerp; winIsTerr = false; winName = itemName;
-              multiN = rGeomN; multiP = rGeomP; multiPerp = rGeomPerp;
+              multiN = rGeomN; multiP = rGeomP; multiPerp = hadWallTris ? rGeomPerp : itemBest;
               multiPos = new Vector3(go->Position.X, go->Position.Y, go->Position.Z);
             }
           }
@@ -1650,7 +1650,7 @@ namespace HousingUnlocked
             bestSingleBB = itemBB;
             winN = rGeomN; winP = rGeomP; winT = rGeomT; winSide = rGeomSide;
             winSigned = rGeomSigned; winPerp = rGeomPerp; winIsTerr = false; winName = itemName;
-            singleN = rGeomN; singleP = rGeomP; singlePerp = rGeomPerp;
+            singleN = rGeomN; singleP = rGeomP; singlePerp = hadWallTris ? rGeomPerp : itemBest;
             singlePos = new Vector3(go->Position.X, go->Position.Y, go->Position.Z);
           }
         }
@@ -1723,19 +1723,18 @@ namespace HousingUnlocked
       // So the multi-face distance is the PERPENDICULAR distance to the winning face's snap
       // PLANE, valid on BOTH sides of it - not the ray parameter along the item's facing
       // axis, which grows without bound when the item faces away or is inside the hollow.
-      var multiPlaneDist = float.PositiveInfinity;
-      if (multiN != Vector3.Zero && multiP != Vector3.Zero)
-        multiPlaneDist = MathF.Abs(Vector3.Dot(multiN, probes[0] - multiP));
-      if (multiPlaneDist < bestMulti) bestMulti = multiPlaneDist;
+      // FINITE PATCH distance (v1.15.97). The snap wall is a bounded quad, not an infinite
+      // plane. Using the plane distance ignored lateral offset, so a lantern rotated 70 deg
+      // read as "0.3 from the plane" from yalms away along the wall and claimed snaps from
+      // across the room (author report, 2026-10-27). Use the true point-to-patch distance,
+      // which is what the triangle walk already computes; it is only stale when the winning
+      // distance came from the AABB fallback, which the merge now corrects.
+      if (!float.IsInfinity(multiPerp) && multiPerp < bestMulti) bestMulti = multiPerp;
+      if (!float.IsInfinity(singlePerp) && singlePerp < bestSingle) bestSingle = singlePerp;
 
       // Same model applies to SINGLE-face receivers (author, 2026-10-27: "the stage panel
-      // and one faced things are the same, just only has one wall"). They are hollow with
-      // a single snap wall, so the distance is likewise the perpendicular distance to that
-      // face's plane, valid on both sides.
-      var singlePlaneDist = float.PositiveInfinity;
-      if (singleN != Vector3.Zero && singleP != Vector3.Zero)
-        singlePlaneDist = MathF.Abs(Vector3.Dot(singleN, probes[0] - singleP));
-      if (singlePlaneDist < bestSingle) bestSingle = singlePlaneDist;
+      // and one faced things are the same, just only has one wall"); its point-to-patch
+      // distance is applied above via singlePerp.
 
       if (occludedBySingle)
       {
