@@ -1470,6 +1470,20 @@ namespace HousingUnlocked
 
         var isMultiSided = SnapRangeData.IsMultiSidedWallReceiver(cached.ItemId);
 
+        // Home-receiver detection: the position the item had when selected. If it
+        // sits on this receiver's face, the item is attached to it and the engine
+        // re-attaches it at any angle when moved nearby (measured 2026-10-26).
+        var homeNear = false;
+        var selBB = GetItemColliderUnion(group);
+        if (selBB.HasValue)
+        {
+          var b = selBB.Value;
+          var sp = _activeItemSelectPos;
+          homeNear = sp.X >= b.Min.X - 0.3f && sp.X <= b.Max.X + 0.3f &&
+                     sp.Y >= b.Min.Y - 0.3f && sp.Y <= b.Max.Y + 0.3f &&
+                     sp.Z >= b.Min.Z - 0.3f && sp.Z <= b.Max.Z + 0.3f;
+        }
+
         var itemInstances = group->Instances.Instances;
         var itemSize = (int)(itemInstances.Last - itemInstances.First);
         var hadWallTris = false;
@@ -1496,7 +1510,7 @@ namespace HousingUnlocked
             childM,
             probes, limit, cached.Name,
             ref itemBest, ref itemName, ref wallTris, ref hadWallTris,
-            itemFront, acceptBackSide: false, acceptBothSides: true);
+            itemFront, acceptBackSide: false, acceptBothSides: true, noAngleGate: homeNear);
         }
 
         if (itemBest < beforeItemBest)
@@ -1773,7 +1787,7 @@ namespace HousingUnlocked
     private static unsafe void WalkWallTriangles(
       BgPartsLayoutInstance* bgPart, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      Vector3 itemFront, bool acceptBackSide = false, bool acceptBothSides = false)
+      Vector3 itemFront, bool acceptBackSide = false, bool acceptBothSides = false, bool noAngleGate = false)
     {
       var collider = bgPart->Collider;
       if (collider == null || collider->GetColliderType() != ColliderType.Mesh) return;
@@ -1782,13 +1796,13 @@ namespace HousingUnlocked
       var pcb = (MeshPCB*)meshCol->Mesh;
       if (pcb->RootNode == null) return;
 
-      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides, itemFront);
+      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides, itemFront, noAngleGate);
     }
 
     private static unsafe void WalkNode(
       MeshPCB.FileNode* node, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides, Vector3 itemFront)
+      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides, Vector3 itemFront, bool noAngleGate = false)
     {
       if (node == null || depth > 64) return;
       if (!visited.Add((nint)node)) return;
@@ -1850,6 +1864,13 @@ namespace HousingUnlocked
                            tf >= -0.1f && tf <= limit;
             if (!backHit && !frontHit) continue;
             t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
+            // Angle gate (measured 2026-10-26): the effective capture shrinks with
+            // the angle between the item's facing and the wall normal - full 1.0
+            // square-on, ~0.34 at 70 deg (the engine never attached at 0.03-0.5
+            // from the face at that angle). The item's own home receiver is exempt:
+            // an attached item re-attaches to it at any angle.
+            var facingCos = MathF.Abs(Vector3.Dot(n, itemFront));
+            if (!noAngleGate && t > limit * facingCos) continue;
             // Oblique gate (measured 2026-10-26, White Rect at yaw 70: 12/12 menu
             // exits at 0.03-0.5 distance never attached, while square-on attaches
             // out to 1.0): the effective capture shrinks with the angle between
@@ -1877,8 +1898,8 @@ namespace HousingUnlocked
         }
       }
 
-      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
-      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
+      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront, noAngleGate);
+      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront, noAngleGate);
     }
 
     /// <summary>Möller–Trumbore ray/triangle intersection (no back-face culling).</summary>
