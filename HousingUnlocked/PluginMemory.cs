@@ -1499,7 +1499,8 @@ namespace HousingUnlocked
             childM,
             probes, limit, cached.Name,
             ref itemBest, ref itemName, ref wallTris, ref hadWallTris,
-            itemFront, acceptBackSide: false, acceptBothSides: true);
+            itemFront, acceptBackSide: false, acceptBothSides: true,
+            frontLimit: isMultiSided ? 0.177f : 0f, backLimit: isMultiSided ? 0.58f : 0f);
         }
 
         if (itemBest < beforeItemBest)
@@ -1775,7 +1776,8 @@ namespace HousingUnlocked
     private static unsafe void WalkWallTriangles(
       BgPartsLayoutInstance* bgPart, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      Vector3 itemFront, bool acceptBackSide = false, bool acceptBothSides = false)
+      Vector3 itemFront, bool acceptBackSide = false, bool acceptBothSides = false,
+      float frontLimit = 0f, float backLimit = 0f)
     {
       var collider = bgPart->Collider;
       if (collider == null || collider->GetColliderType() != ColliderType.Mesh) return;
@@ -1784,13 +1786,14 @@ namespace HousingUnlocked
       var pcb = (MeshPCB*)meshCol->Mesh;
       if (pcb->RootNode == null) return;
 
-      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides, itemFront);
+      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides, itemFront, frontLimit, backLimit);
     }
 
     private static unsafe void WalkNode(
       MeshPCB.FileNode* node, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides, Vector3 itemFront)
+      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides, Vector3 itemFront,
+      float frontLimit = 0f, float backLimit = 0f)
     {
       if (node == null || depth > 64) return;
       if (!visited.Add((nint)node)) return;
@@ -1856,6 +1859,14 @@ namespace HousingUnlocked
             hitBack = backHit && (!frontHit || tb <= tf);
             t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
             hitDot = Vector3.Dot(n, hitBack ? -itemFront : itemFront);
+            if (frontLimit > 0f)
+            {
+              // Multi-face receiver capture (measured on the White Rect):
+              // 0.177 on the face's normal side, 0.58 on the back side. Beyond
+              // that the engine leaves the item where it is.
+              var sideLimit = hitDot < 0f ? frontLimit : backLimit;
+              if (t > sideLimit) continue;
+            }
           }          else
           {
             // Fallback for callers that don't pass the facing axis: plain distance
@@ -1877,8 +1888,8 @@ namespace HousingUnlocked
         }
       }
 
-      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
-      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
+      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront, frontLimit, backLimit);
+      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront, frontLimit, backLimit);
     }
 
     /// <summary>Möller–Trumbore ray/triangle intersection (no back-face culling).</summary>
