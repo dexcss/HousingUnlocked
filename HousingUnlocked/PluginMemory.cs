@@ -239,6 +239,17 @@ namespace HousingUnlocked
     public string LastReverseWallNames { get; private set; } = "";
     public string ReverseWallDiagnostic { get; private set; } = "(not computed)";
 
+    /// <summary>
+    /// Compact per-frame reverse-wall geometry, written to the JSONL frame line as
+    /// "revDiag". It records the NEAREST placed category-15 item even when it is
+    /// rejected, including that item's live position and facing, so a warning that
+    /// flickers can be correlated with the placed item actually moving (re-instance)
+    /// rather than with the held receiver's position. Format:
+    ///   n=&lt;candidates&gt; near="&lt;name&gt;" p=(x,y,z) f=(x,y,z) a=along s=side g=gap why=ok|behind|side|far
+    ///   ap=(active pivot) fh=faceHalf sideTol=... cap=...
+    /// </summary>
+    public string ReverseWallFrameDiag { get; private set; } = "(not computed)";
+
     // Last raycast result for the active item (for diagnostics).
     public float LastFloorRaycastDistance { get; private set; } = float.PositiveInfinity;
     public bool LastFloorRaycastHit { get; private set; } = false;
@@ -1635,18 +1646,29 @@ namespace HousingUnlocked
     /// at the receiver, and the receiver's wall face must be inside the flat wall
     /// capture. Measured 2026-10-26: the Wall Lantern at Z=-8.50 re-attached to a
     /// White Rect between Z=-7.6594 and -7.5594 (inside the 1.0 capture).
+    ///
+    /// GAP CONVENTION: the capture is measured to the receiver's FAR face
+    /// (along + faceHalf). That is the v1.15.41 calibration and the only reverse
+    /// boundary ever validated in-game; it is restored here after the near-face
+    /// form shipped in v1.15.52-56 produced "it says it will snap way too far away".
+    ///
+    /// The method also fills <see cref="ReverseWallFrameDiag"/> every frame with the
+    /// nearest placed wall item's live position/facing and the accept/reject reason,
+    /// so log transitions can be explained geometrically instead of guessed at.
     /// </summary>
     public unsafe void UpdateReverseWallSnapDetection()
     {
       LastReverseWallHit = false;
       LastReverseWallNames = "";
       ReverseWallDiagnostic = "(not computed)";
+      ReverseWallFrameDiag = "(not computed)";
 
       if (HousingStructure == null || HousingStructure->ActiveItem == null ||
           HousingModule == null || HousingModule->GetCurrentManager() == null ||
           HousingModule->GetCurrentManager()->Objects == null)
       {
         ReverseWallDiagnostic = "no housing/active item";
+        ReverseWallFrameDiag = "n=0 why=no-housing-or-active-item";
         return;
       }
 
@@ -1655,6 +1677,7 @@ namespace HousingUnlocked
       if (activeItemId == 0 || !SnapRangeData.IsWallReceiver(activeItemId))
       {
         ReverseWallDiagnostic = activeItemId == 0 ? "no active item id" : "active item is not a wall receiver";
+        ReverseWallFrameDiag = activeItemId == 0 ? "n=0 why=no-active-item-id" : $"n=0 why=active-not-wall-receiver item={activeItemId}";
         return;
       }
 
@@ -1662,6 +1685,7 @@ namespace HousingUnlocked
       if (!config.ShowWallSnapWarning)
       {
         ReverseWallDiagnostic = "wall warnings disabled";
+        ReverseWallFrameDiag = "n=0 why=warnings-disabled";
         return;
       }
 
@@ -1672,6 +1696,20 @@ namespace HousingUnlocked
       var sideTolerance = MathF.Max(ob.HalfExtents.X, ob.HalfExtents.Z) + 0.5f;
       var faceHalf = MathF.Min(ob.HalfExtents.X, ob.HalfExtents.Z);
       var scanRadius = capture + sideTolerance + 2f;
+
+      // Diagnostic accumulators: the nearest placed wall item by |along|, recorded
+      // even when rejected, plus the reason it was rejected. This is what makes the
+      // log explainable: if the warning flips while the held item is stationary, the
+      // placed item's p=/f= values in successive revDiag strings will have moved.
+      var candCount = 0;
+      var nearAbs = float.PositiveInfinity;
+      var nearName = "";
+      var nearPos = default(Vector3);
+      var nearFront = default(Vector3);
+      var nearAlong = 0f;
+      var nearSide = 0f;
+      var nearGap = 0f;
+      var nearReason = "";
 
       var targets = new List<(string Name, float Gap)>();
       for (var i = 0; i < 600; i++)
@@ -1728,22 +1766,59 @@ namespace HousingUnlocked
         var goPos = new System.Numerics.Vector3(go->Position.X, go->Position.Y, go->Position.Z);
         var toActive = activePos - goPos;
         var along = Vector3.Dot(front, toActive);
-        if (along <= 0f) continue; // receiver behind the wall item -> never re-attaches
 
         var sideSq = Vector3.Dot(toActive, toActive) - along * along;
         var side = sideSq > 0f ? MathF.Sqrt(sideSq) : 0f;
-        if (side > sideTolerance) continue; // outside the receiver's face width
 
-        var gap = along - faceHalf;
+        // FAR-FACE gap (v1.15.41 calibration, restored in 1.15.57). The capture is
+        // measured to the receiver's far face, i.e. along + faceHalf, NOT the near
+        // face. Measured 2026-10-26 with the Wall Lantern at Z=-8.50 and the White
+        // Rect approaching: the engine re-attached at along=0.84 (gap 0.955 <= 1.0)
+        // and did NOT at along=0.94 (gap 1.055 > 1.0). The near-face form
+        // (along - faceHalf) reported both as inside capture, which is exactly the
+        // "it says will snap when it is way too far away" report.
+        var gap = along + faceHalf;
         if (gap < 0f) gap = 0f;
-        if (gap > capture) continue;
+
+        string reason;
+        if (along <= 0f) reason = "behind";            // receiver behind the item -> never re-attaches
+        else if (side > sideTolerance) reason = "side"; // outside the receiver's face width
+        else if (gap > capture) reason = "far";         // in front but outside capture
+        else reason = "ok";
+
+        candCount++;
+        var absAlong = MathF.Abs(along);
+        if (absAlong < nearAbs)
+        {
+          nearAbs = absAlong;
+          nearName = cached.Name;
+          nearPos = goPos;
+          nearFront = front;
+          nearAlong = along;
+          nearSide = side;
+          nearGap = gap;
+          nearReason = reason;
+        }
+
+        if (reason != "ok") continue;
 
         targets.Add((cached.Name, gap));
       }
 
+      var geomDiag =
+        $"ap=({activePos.X:0.###},{activePos.Y:0.###},{activePos.Z:0.###}) " +
+        $"fh={faceHalf:0.###} sideTol={sideTolerance:0.###} cap={capture:0.###}";
+      ReverseWallFrameDiag = candCount == 0
+        ? $"n=0 {geomDiag}"
+        : $"n={candCount} near=\"{nearName}\" " +
+          $"p=({nearPos.X:0.###},{nearPos.Y:0.###},{nearPos.Z:0.###}) " +
+          $"f=({nearFront.X:0.###},{nearFront.Y:0.###},{nearFront.Z:0.###}) " +
+          $"a={nearAlong:0.###} s={nearSide:0.###} g={nearGap:0.###} why={nearReason} " +
+          geomDiag;
+
       if (targets.Count == 0)
       {
-        ReverseWallDiagnostic = $"no wall item in capture (capture {capture:0.##}, side tol {sideTolerance:0.##})";
+        ReverseWallDiagnostic = $"no wall item in capture; {ReverseWallFrameDiag}";
         return;
       }
 
@@ -1752,7 +1827,7 @@ namespace HousingUnlocked
       if (targets.Count > 3) names += " +" + (targets.Count - 3);
       LastReverseWallHit = true;
       LastReverseWallNames = names;
-      ReverseWallDiagnostic = $"{targets.Count} wall item(s) would re-attach: {names}";
+      ReverseWallDiagnostic = $"{targets.Count} wall item(s) would re-attach: {names}; {ReverseWallFrameDiag}";
     }
 
     private static Matrix4x4 BuildMatrix(FFXIVClientStructs.FFXIV.Client.LayoutEngine.Transform t) => t.Compose();

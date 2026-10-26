@@ -181,7 +181,7 @@ namespace HousingUnlocked.Interface.Components
           Memory.LastItemSnapHit, Memory.LastItemSnapTargetName, Memory.LastItemSnapDistance, Memory.LastItemSnapEffectiveRange,
           Memory.LastWallSnapHit, Memory.LastWallSnapTargetName, Memory.LastWallSnapDistance, Memory.LastWallSnapThreshold, Memory.LastWallSnapTargetIsTerritory, Memory.WallSnapDiagnostic,
           Memory.LastTableSnapHit, Memory.LastTableSnapTargetName, Memory.LastTableSnapDeltaY, Memory.TableSnapDiagnostic,
-          Memory.LastReverseWallHit, Memory.LastReverseWallNames,
+          Memory.LastReverseWallHit, Memory.LastReverseWallNames, Memory.ReverseWallFrameDiag,
           Memory.SnapThresholdDiagnostic, Memory.ItemSnapDiagnostic);
       }
     }

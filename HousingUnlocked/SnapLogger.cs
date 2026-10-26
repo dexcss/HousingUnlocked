@@ -96,12 +96,15 @@ namespace HousingUnlocked
       bool itemHit, string itemName, float itemD, float itemRange,
       bool wallHit, string wallName, float wallD, float wallThr, bool wallTerritory, string wallDiag,
       bool tableHit, string tableName, float tableDy, string tableDiag,
-      bool reverseWallHit, string reverseWallNames,
+      bool reverseWallHit, string reverseWallNames, string reverseWallDiag,
       string scrDiag, string itemSnapDiag)
     {
       if (_writer == null) return;
 
-      var sig = $"{R(px)}|{R(py)}|{R(pz)}|{R(yaw)}|{dir}|{inSnapZone}|{snapsUp}|{itemHit}|{R(itemD)}|{wallHit}|{R(wallD)}|{wallTerritory}|{tableHit}|{R(tableDy)}|{reverseWallHit}|{state}|{R(perItemThreshold)}";
+      // The reverse-wall geometry is part of the signature on purpose: when the
+      // placed item re-instances mid-drag, its position changes while the held item
+      // may be stationary, and that transition must reach the log.
+      var sig = $"{R(px)}|{R(py)}|{R(pz)}|{R(yaw)}|{dir}|{inSnapZone}|{snapsUp}|{itemHit}|{R(itemD)}|{wallHit}|{R(wallD)}|{wallTerritory}|{tableHit}|{R(tableDy)}|{reverseWallHit}|{state}|{R(perItemThreshold)}|{reverseWallDiag}";
       var now = DateTime.Now;
       var stale = (now - _lastFrameWrite).TotalMilliseconds > 250;
       if (sig == _lastSig && !stale) return;
@@ -117,7 +120,7 @@ namespace HousingUnlocked
         $"\"itemHit\":{(itemHit ? 1 : 0)},\"itemTarget\":\"{Esc(itemName)}\",\"itemD\":{Jn(itemD)},\"itemRange\":{Jn(itemRange)}," +
         $"\"wallHit\":{(wallHit ? 1 : 0)},\"wallTarget\":\"{Esc(wallName)}\",\"wallD\":{Jn(wallD)},\"wallThr\":{R(wallThr)},\"wallTerritory\":{(wallTerritory ? 1 : 0)},\"wallDiag\":\"{Esc(wallDiag)}\"," +
         $"\"tableHit\":{(tableHit ? 1 : 0)},\"tableTarget\":\"{Esc(tableName)}\",\"tableDy\":{Jn(tableDy)},\"tableDiag\":\"{Esc(tableDiag)}\"," +
-        $"\"revWall\":{(reverseWallHit ? 1 : 0)},\"revWallTarget\":\"{Esc(reverseWallNames)}\"," +
+        $"\"revWall\":{(reverseWallHit ? 1 : 0)},\"revWallTarget\":\"{Esc(reverseWallNames)}\",\"revDiag\":\"{Esc(reverseWallDiag)}\"," +
         $"\"thrSrc\":\"{Esc(scrDiag)}\",\"itemDiag\":\"{Esc(itemSnapDiag)}\"");
     }
 
