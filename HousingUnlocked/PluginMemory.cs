@@ -1942,10 +1942,12 @@ namespace HousingUnlocked
         {
           compText = $"\"{compName}\"@{(compTerritory ? "terr" : compDist.ToString("0.###"))}";
           if (compLog.Count < 4) compLog.Add($"{cached.Name}->{compText}");
-          // Suppress only when the competitor is MEANINGFULLY closer (1 cm). Ties and
-          // near-ties keep the warning: a line that vanishes while the item is sliding
-          // into place is worse than one that lingers a moment.
-          if (compGroup != (nint)active && compDist < triBest - 0.01f) continue;
+          // NOTE: this is DATA ONLY, it does NOT suppress. An earlier version suppressed
+          // when a different receiver was closer, and that was wrong: the only validated
+          // reverse boundary (v1.15.41) had the lantern sitting ON a wall at distance ~0
+          // and still re-attaching to a partition 0.72 away. "Already attached to
+          // something closer" therefore does NOT predict "will not move". Condition 0
+          // (already attached to THE HELD RECEIVER) is the real predictor.
         }
         else
         {
