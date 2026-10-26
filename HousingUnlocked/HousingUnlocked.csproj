@@ -1,6 +1,6 @@
 <Project Sdk="Dalamud.NET.Sdk/15.0.0">
   <PropertyGroup>
-    <Version>1.15.94.0</Version>
+    <Version>1.15.95.0</Version>
     <AssemblyName>HousingUnlocked</AssemblyName>
     <RootNamespace>HousingUnlocked</RootNamespace>
     <Product>Housing Unlocked</Product>

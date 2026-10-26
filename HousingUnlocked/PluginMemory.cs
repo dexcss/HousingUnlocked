@@ -1833,8 +1833,11 @@ namespace HousingUnlocked
       if (wallOffset > 0f && !float.IsInfinity(bestFurn))
         bestFurn += wallOffset;
 
-      var furnHit = bestFurn <= limit;
-      var terrHit = bestTerr <= territoryLimit;
+      // STRICT comparison: the engine snaps at 0.99 but NOT at exactly 1.0 (author,
+      // 2026-10-27). Using <= accepted the boundary itself and produced a false positive
+      // at exactly the capture distance.
+      var furnHit = bestFurn < limit;
+      var terrHit = bestTerr < territoryLimit;
       var geomDiag = $"front=({itemFront.X:0.###},{itemFront.Y:0.###},{itemFront.Z:0.###}) " +
                      $"recv=[{string.Join(";", recvLog)}] " +
                      $"win={(winName.Length > 0 ? winName : "-")}{(winIsTerr ? "(terr)" : "")} " +
