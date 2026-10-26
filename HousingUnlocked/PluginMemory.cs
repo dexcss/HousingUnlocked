@@ -1504,6 +1504,12 @@ namespace HousingUnlocked
       var winPerp = 0f;
       var winIsTerr = false;
       var winName = "";
+      // Per-class hit plane + position, needed for the occlusion rule: a single-face
+      // panel BETWEEN the item and a multi-face receiver BLOCKS it (author, 2026-10-27:
+      // behind the Stage Panel -> snaps to the Stage Panel; in the gap -> snaps to the
+      // White Rect). That is a side-of-plane test, not a distance test.
+      var multiN = Vector3.Zero; var multiP = Vector3.Zero; var multiPos = Vector3.Zero;
+      var singleN = Vector3.Zero; var singleP = Vector3.Zero; var singlePos = Vector3.Zero;
 
       for (var i = 0; i < 600; i++)
       {
@@ -1619,6 +1625,8 @@ namespace HousingUnlocked
               bestMulti = itemBest; bestMultiName = itemName; bestMultiBB = itemBB;
               winN = rGeomN; winP = rGeomP; winT = rGeomT; winSide = rGeomSide;
               winSigned = rGeomSigned; winPerp = rGeomPerp; winIsTerr = false; winName = itemName;
+              multiN = rGeomN; multiP = rGeomP;
+              multiPos = new Vector3(go->Position.X, go->Position.Y, go->Position.Z);
             }
           }
           else if (itemBest < bestSingle)
@@ -1628,6 +1636,8 @@ namespace HousingUnlocked
             bestSingleBB = itemBB;
             winN = rGeomN; winP = rGeomP; winT = rGeomT; winSide = rGeomSide;
             winSigned = rGeomSigned; winPerp = rGeomPerp; winIsTerr = false; winName = itemName;
+            singleN = rGeomN; singleP = rGeomP;
+            singlePos = new Vector3(go->Position.X, go->Position.Y, go->Position.Z);
           }
         }
       }
@@ -1643,7 +1653,26 @@ namespace HousingUnlocked
       // White Rect being outside ITS OWN (smaller, magnet-like) capture rather than the
       // class order being wrong. Do not replace this with nearest-wins again: three
       // distance-based rules were tried and each contradicted the author's report.
-      if (bestMulti <= limit)
+      // OCCLUSION (author, 2026-10-27): if a single-face panel lies BETWEEN the item and
+      // the multi-face receiver, the multi-face one is blocked and the panel wins even
+      // though multi-face has the higher class priority. Otherwise class priority holds:
+      // territory < single-face < multi-face.
+      var occludedBySingle = false;
+      if (bestMulti <= limit && bestSingle <= limit && singleN != Vector3.Zero)
+      {
+        var itemSide = Vector3.Dot(singleN, probes[0] - singleP);
+        var multiSide = Vector3.Dot(singleN, multiPos - singleP);
+        occludedBySingle = itemSide * multiSide < 0f;
+      }
+
+      if (occludedBySingle)
+      {
+        bestFurn = bestSingle;
+        bestFurnName = bestSingleName;
+        bestFurnBB = bestSingleBB;
+        furnClass = "single-face (occludes multi)";
+      }
+      else if (bestMulti <= limit)
       {
         bestFurn = bestMulti;
         bestFurnName = bestMultiName;
