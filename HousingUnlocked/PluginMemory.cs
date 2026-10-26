@@ -1734,9 +1734,16 @@ namespace HousingUnlocked
         var side = sideSq > 0f ? MathF.Sqrt(sideSq) : 0f;
         if (side > sideTolerance) continue; // outside the receiver's face width
 
+        // The receiver's face normal (its own thin axis): the capture shrinks with
+        // the angle between the wall item's facing and the receiver's face - an
+        // oblique receiver must be much closer (measured 2026-10-26, same cos rule
+        // as the active wall snap).
+        var rectNormal = Vector3.Transform(Vector3.UnitZ, active->Transform.Rotation);
+        var cosA = MathF.Abs(Vector3.Dot(front, rectNormal));
+        var effectiveCapture = capture * cosA;
         var gap = along - faceHalf;
         if (gap < 0f) gap = 0f;
-        if (gap > capture) continue;
+        if (gap > effectiveCapture) continue;
 
         targets.Add((cached.Name, gap));
       }
