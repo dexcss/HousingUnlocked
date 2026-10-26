@@ -1728,6 +1728,15 @@ namespace HousingUnlocked
         multiPlaneDist = MathF.Abs(Vector3.Dot(multiN, probes[0] - multiP));
       if (multiPlaneDist < bestMulti) bestMulti = multiPlaneDist;
 
+      // Same model applies to SINGLE-face receivers (author, 2026-10-27: "the stage panel
+      // and one faced things are the same, just only has one wall"). They are hollow with
+      // a single snap wall, so the distance is likewise the perpendicular distance to that
+      // face's plane, valid on both sides.
+      var singlePlaneDist = float.PositiveInfinity;
+      if (singleN != Vector3.Zero && singleP != Vector3.Zero)
+        singlePlaneDist = MathF.Abs(Vector3.Dot(singleN, probes[0] - singleP));
+      if (singlePlaneDist < bestSingle) bestSingle = singlePlaneDist;
+
       if (occludedBySingle)
       {
         bestFurn = bestSingle;
