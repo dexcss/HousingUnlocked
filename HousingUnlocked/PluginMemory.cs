@@ -1632,37 +1632,27 @@ namespace HousingUnlocked
         }
       }
 
-      // Receiver choice with HYSTERESIS. Nearest-wins alone still lost a case the
-      // multi-face rule had won, and vice versa, so the engine evidently keeps the item
-      // on its current receiver until another is clearly better. Approximate that:
-      // prefer the closest in-capture receiver, but stay on the previously chosen one
-      // unless the alternative is >= 10 cm closer.
-      var pickMulti = bestMulti <= limit ? bestMulti : float.PositiveInfinity;
-      var pickSingle = bestSingle <= limit ? bestSingle : float.PositiveInfinity;
-      var pickIsMulti = pickMulti <= pickSingle;
-      var pickDist = pickIsMulti ? pickMulti : pickSingle;
-      var pickName = pickIsMulti ? bestMultiName : bestSingleName;
-
-      if (_lastWallFurnName.Length > 0 && !float.IsInfinity(pickDist))
+      // RECEIVER RULE, FITTED FROM GROUND TRUTH (2026-10-27, MATCH lines):
+      //   case 1: Stage Panel (single) 0.000 vs White Rect (multi) 0.816 -> engine chose SINGLE
+      //   case 2: Stage Panel (single) 0.513 vs White Rect (multi) 0.563 -> engine chose MULTI
+      // Case 2 shows a multi-face receiver winning while FARTHER, so class matters; case 1
+      // shows it losing by a lot, so class is not absolute. A multi-face receiver getting a
+      // ~10 cm distance handicap satisfies both: pure-nearest (H=0) misses case 2, pure
+      // class-priority (H>=0.82) misses case 1, H=0.10 fits both.
+      var multiWins = bestMulti <= limit && bestMulti <= bestSingle + 0.10f;
+      if (multiWins)
       {
-        var lastDist = _lastWallFurnName == bestMultiName ? pickMulti
-                     : _lastWallFurnName == bestSingleName ? pickSingle
-                     : float.PositiveInfinity;
-        if (!float.IsInfinity(lastDist) && lastDist <= pickDist + 0.10f)
-        {
-          pickIsMulti = _lastWallFurnName == bestMultiName;
-          pickDist = lastDist;
-          pickName = _lastWallFurnName;
-        }
+        bestFurn = bestMulti;
+        bestFurnName = bestMultiName;
+        bestFurnBB = bestMultiBB;
+        furnClass = "multi-face";
       }
-      _lastWallFurnName = pickName;
-
-      if (!float.IsInfinity(pickDist) && pickName.Length > 0)
+      else if (bestSingle <= limit)
       {
-        bestFurn = pickDist;
-        bestFurnName = pickName;
-        bestFurnBB = pickIsMulti ? bestMultiBB : bestSingleBB;
-        furnClass = (pickIsMulti ? "multi-face" : "single-face") + " (sticky)";
+        bestFurn = bestSingle;
+        bestFurnName = bestSingleName;
+        bestFurnBB = bestSingleBB;
+        furnClass = "single-face";
       }
       else
       {
