@@ -1722,7 +1722,13 @@ namespace HousingUnlocked
         bestFurnBB = bestSingleBB;
         furnClass = "single-face (occludes multi)";
       }
-      else if (bestMulti <= limit || multiPerp <= limit)
+      // NOTE: do NOT use multiPerp here. It is read from rGeomPerp, a shared scratch field
+      // written during the triangle walk, and it is STALE within a frame - observed
+      // reporting 0 for a receiver whose real distance was 4.661. Using it
+      // (v1.15.79) let an out-of-range White Rect win and suppressed the warning for a
+      // partition the lantern was touching (hu_session_20261027_111843). The ray distance
+      // bestMulti is correct; oblique over-estimation is preferable to a false zero.
+      else if (bestMulti <= limit)
       {
         bestFurn = bestMulti;
         bestFurnName = bestMultiName;
