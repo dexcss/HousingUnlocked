@@ -828,7 +828,6 @@ namespace HousingUnlocked
       }
 
       var config = Plugin.GetConfiguration();
-      var safety = config.SnapThreshold;
       var mode = config.ItemSnapRangeMode;
 
       float bestDist = float.PositiveInfinity;
@@ -889,7 +888,13 @@ namespace HousingUnlocked
         };
         if (effective <= 0f) continue;
 
-        if (dist <= effective + safety && dist < bestDist)
+        // STRICT test for the "WILL SNAP" card. The safety margin (config.SnapThreshold,
+        // default 0.07) is an early-warning allowance, NOT part of the engine's snap
+        // range. Including it here produced false cards: measured 2026-10-26 holding the
+        // White Rect, the Stage Panel has range 0.100 and the logged distance was 0.1655,
+        // yet 0.1655 <= 0.100 + 0.07 = 0.17 made the card claim "WILL SNAP - item:
+        // Stage Panel". It does not snap at that distance.
+        if (dist <= effective && dist < bestDist)
         {
           bestDist = dist;
           bestEffective = effective;
@@ -1846,7 +1851,7 @@ namespace HousingUnlocked
         if (candLog.Count < 4)
         {
           var shortName = cached.Name.Length > 18 ? cached.Name.Substring(0, 18) : cached.Name;
-          candLog.Add($"{shortName}@{triBest:0.##}");
+          candLog.Add($"{shortName}@{(float.IsInfinity(triBest) ? "-" : triBest.ToString("0.##"))}");
         }
         // Rank so that a candidate with a real triangle distance always outranks one
         // whose receiver has no readable wall triangles.
