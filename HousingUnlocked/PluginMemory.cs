@@ -1791,6 +1791,22 @@ namespace HousingUnlocked
         }
       }
 
+      // SURFACE -> ATTACH-POINT CORRECTION (v1.15.90).
+      // The engine's capture is 1.0 measured from the ATTACH POINT - where the item comes
+      // to rest when snapped - while this code measures the distance to the receiver's
+      // wall surface. The two differ by the item's own wall offset.
+      // Calibrated 2026-10-27 on a Blank Riviera Partition:
+      //   partition pivot Z=0.1183, lantern settles at Z=0.3683 (offset +0.25)
+      //   flip: lantern -0.631 -> 0.9993 from attach (snaps), -0.632 -> 1.0003 (doesn't)
+      //   plugin surface distance D at that flip = 0.499  =>  surface->attach = 0.500
+      // Applied to single-face receivers only, to avoid moving the multi-face thresholds
+      // that are already confirmed working.
+      var wallOffset = 0f;
+      if (_cachedActiveItemId != 0)
+        SnapRangeData.TryGetWallThreshold(_cachedActiveItemId, out wallOffset);
+      if (wallOffset > 0f && !float.IsInfinity(bestFurn) && furnClass == "single-face")
+        bestFurn += wallOffset;
+
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
       var geomDiag = $"front=({itemFront.X:0.###},{itemFront.Y:0.###},{itemFront.Z:0.###}) " +
