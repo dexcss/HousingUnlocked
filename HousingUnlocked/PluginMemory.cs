@@ -1659,17 +1659,24 @@ namespace HousingUnlocked
       // territory < single-face < multi-face.
       var occludedBySingle = false;
       var occDepth = 0f;
+      var occPanelHalf = 0f;
       if (bestMulti <= limit && bestSingle <= limit && singleN != Vector3.Zero)
       {
         var itemSide = Vector3.Dot(singleN, probes[0] - singleP);
         var multiSide = Vector3.Dot(singleN, multiPos - singleP);
         occDepth = itemSide;
-        // The multi-face receiver still wins slightly PAST the panel's plane (author,
-        // 2026-10-27: "slightly in it still snaps up to the white rect"), so its capture
-        // reaches a little through the panel. Only treat the panel as blocking once the
-        // item is more than OCC_MARGIN behind the plane.
-        const float OCC_MARGIN = 0.15f;
-        occludedBySingle = itemSide * multiSide < 0f && MathF.Abs(itemSide) > OCC_MARGIN;
+        // "FULLY behind the face" (author, 2026-10-27): the item only switches to the
+        // single-face panel once it is past the panel's whole BODY, not merely past its
+        // plane. Anything less and the multi-face receiver still wins. So the required
+        // depth is the panel's own half-thickness along the hit normal, not a constant.
+        if (bestSingleBB.HasValue)
+        {
+          var e = bestSingleBB.Value.Max - bestSingleBB.Value.Min;
+          occPanelHalf = 0.5f * (MathF.Abs(singleN.X) * e.X
+                               + MathF.Abs(singleN.Y) * e.Y
+                               + MathF.Abs(singleN.Z) * e.Z);
+        }
+        occludedBySingle = itemSide * multiSide < 0f && MathF.Abs(itemSide) > MathF.Max(0.05f, occPanelHalf);
       }
 
       if (occludedBySingle)
@@ -1750,7 +1757,7 @@ namespace HousingUnlocked
                      $"winN=({winN.X:0.###},{winN.Y:0.###},{winN.Z:0.###}) " +
                      $"winP=({winP.X:0.###},{winP.Y:0.###},{winP.Z:0.###}) " +
                      $"winT={winT:0.###} winSide={winSide} winSD={winSigned:0.###} winPerp={winPerp:0.###} " +
-                     $"occDepth={occDepth:0.###} occBlocked={(occludedBySingle ? 1 : 0)}";
+                     $"occDepth={occDepth:0.###} occPanelHalf={occPanelHalf:0.###} occBlocked={(occludedBySingle ? 1 : 0)}";
       WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} ({probes.Count} probes); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag} || {geomDiag}";
 
       if (furnHit || terrHit)
