@@ -1697,7 +1697,6 @@ namespace HousingUnlocked
         // So the panel wins ONLY when the item is touching its front face within 7.5 cm,
         // and NOT when it is behind/inside it. MathF.Abs was wrong: it made every negative
         // (behind-the-face) value win the panel, which broke the -8.6891 case.
-        const float SINGLE_TOUCH = 0.075f;
         occludedBySingle = bestSingle >= 0f && bestSingle <= SINGLE_TOUCH;
       }
 
