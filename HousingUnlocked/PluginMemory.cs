@@ -1652,16 +1652,24 @@ namespace HousingUnlocked
     /// capture. Measured 2026-10-26: the Wall Lantern at Z=-8.50 re-attached to a
     /// White Rect between Z=-7.6594 and -7.5594 (inside the 1.0 capture).
     ///
-    /// RULE (v1.15.59): a placed wall item is predicted to re-attach when its pivot
-    /// lies within the flat wall capture (1.0) of one of the HELD receiver's own
-    /// wall-flagged collision triangles, measured to the receiver's FAR face
-    /// (triangle distance + 2*faceHalf). That is the verified forward rule with the
-    /// roles exchanged, expressed in the same far-face convention as the only reverse
-    /// boundary ever validated in-game, and it deliberately does not gate on the
-    /// placed item's facing: the v1.15.57 instrumentation showed a yaw-70 lantern
-    /// (front (0.94,0,0.34), almost perpendicular to the partition's Z faces)
-    /// attaching anyway, while the old facing gate flipped the line on +/-0.01 of
-    /// `along` - off exactly where the engine attaches.
+    /// RULE (v1.15.61) — two conditions, both required:
+    ///   1. the placed item's pivot is within the flat wall capture (1.0) of one of the
+    ///      HELD receiver's own wall-flagged triangles, measured to the FAR face
+    ///      (triangle distance + 2*faceHalf) — the v1.15.41 validated convention; and
+    ///   2. the HELD receiver is the CLOSEST wall surface to that item
+    ///      (<see cref="FindNearestWallReceiver"/>), otherwise the item simply stays
+    ///      attached where it already is.
+    ///
+    /// Condition 2 is what the 2026-10-26 logs demanded: the Wall Lantern held
+    /// wallD=0.000 on a Stage Panel for 960 frames while a White Rect was dragged past
+    /// it and never moved. Without it the line fires "too early" and names a receiver
+    /// the item will never use.
+    ///
+    /// The rule deliberately does not gate on the placed item's facing: the v1.15.57
+    /// instrumentation showed a yaw-70 lantern (front (0.94,0,0.34), almost
+    /// perpendicular to the partition's Z faces) attaching anyway, while the old facing
+    /// gate flipped the line on +/-0.01 of `along` - off exactly where the engine
+    /// attaches.
     ///
     /// The method also fills <see cref="ReverseWallFrameDiag"/> every frame with the
     /// nearest placed wall item's live transform, the new triangle distance, and the
@@ -1746,6 +1754,7 @@ namespace HousingUnlocked
       // a name that is a false positive but not the nearest one still reaches the log
       // (that gap is why the Stage Panel report was not diagnosable from v1.15.58).
       var candLog = new List<string>(4);
+      var compLog = new List<string>(4);
       var candCount = 0;
       var nearRank = float.PositiveInfinity;
       var nearName = "";
@@ -1880,13 +1889,34 @@ namespace HousingUnlocked
         var farGap = triBest + 2f * faceHalf;
         if (farGap > capture) continue;
 
+        // COMPETITOR TEST: the item only re-attaches to the held receiver if that
+        // receiver is the CLOSEST wall surface to it. Otherwise it stays where it
+        // already is. This is exactly the case the 2026-10-26 log showed: the Wall
+        // Lantern sat at wallD=0.000 on a Stage Panel for 960 frames while a White Rect
+        // was dragged past it, and never moved - so warning about the White Rect was
+        // wrong no matter how close it got.
+        string compText;
+        if (FindNearestWallReceiver(goPos, front, capture, (nint)group, 0,
+              out var compDist, out var compName, out var compGroup, out var compTerritory))
+        {
+          compText = $"\"{compName}\"@{(compTerritory ? "terr" : compDist.ToString("0.###"))}";
+          if (compLog.Count < 4) compLog.Add($"{cached.Name}->{compText}");
+          if (compGroup != (nint)active) continue; // stays on another receiver
+        }
+        else
+        {
+          compText = "none";
+          if (compLog.Count < 4) compLog.Add($"{cached.Name}->none");
+        }
+
         targets.Add((cached.Name, farGap));
       }
 
       var geomDiag =
         $"ap=({activePos.X:0.###},{activePos.Y:0.###},{activePos.Z:0.###}) " +
         $"fh={faceHalf:0.###} sideTol={sideTolerance:0.###} cap={capture:0.###} " +
-        $"kids={activeChildPtrs.Count} cands={string.Join(",", candLog)}";
+        $"kids={activeChildPtrs.Count} cands={string.Join(",", candLog)} " +
+        $"comps={string.Join(",", compLog)}";
       var nearTriText = float.IsInfinity(nearTri) ? "-" : nearTri.ToString("0.###");
       ReverseWallFrameDiag = candCount == 0
         ? $"n=0 {geomDiag}"
@@ -1913,6 +1943,158 @@ namespace HousingUnlocked
       LastReverseWallHit = true;
       LastReverseWallNames = names;
       ReverseWallDiagnostic = $"{targets.Count} wall item(s) would re-attach: {names}; {ReverseWallFrameDiag}";
+    }
+
+    /// <summary>
+    /// Nearest wall receiver for an arbitrary probe point, using the SAME rules as the
+    /// forward wall check: wall-flagged collision triangles of nearby furniture
+    /// (bidirectional facing-axis ray), receiver-class priority multi-face &gt;
+    /// single-face, then the cached territory walls, with furniture beating territory.
+    /// Returns the winning receiver's group pointer (0 for a territory wall) so a caller
+    /// can ask "is the nearest receiver the item I am holding?".
+    ///
+    /// This exists for the reverse check. A placed wall item only MOVES onto the held
+    /// receiver if that receiver is the closest wall surface to it; otherwise it stays
+    /// where it already is. Measured 2026-10-26: the Wall Lantern sat at wallD=0.000 on a
+    /// Stage Panel for 960 frames while a White Rect was dragged past it, and never moved.
+    /// </summary>
+    private unsafe bool FindNearestWallReceiver(
+      Vector3 probe, Vector3 itemFront, float limit, nint skipGroupA, nint skipGroupB,
+      out float dist, out string name, out nint group, out bool isTerritory)
+    {
+      dist = float.PositiveInfinity;
+      name = "";
+      group = 0;
+      isTerritory = false;
+
+      if (HousingModule == null || HousingModule->GetCurrentManager() == null ||
+          HousingModule->GetCurrentManager()->Objects == null)
+        return false;
+
+      var probes = new List<Vector3>(1) { probe };
+      var trTris = 0;
+
+      float bestMulti = float.PositiveInfinity, bestSingle = float.PositiveInfinity;
+      string bestMultiName = "", bestSingleName = "";
+      nint bestMultiGroup = 0, bestSingleGroup = 0;
+
+      for (var i = 0; i < 600; i++)
+      {
+        var addr = HousingModule->GetCurrentManager()->Objects[i];
+        if (addr == 0) continue;
+        var go = (GameObject*)addr;
+        var gp = go->SharedGroupLayoutInstance;
+        if (gp == null) continue;
+        if ((nint)gp == skipGroupA || (nint)gp == skipGroupB) continue;
+        if (Vector3.Distance(probe, go->Position) > 8f) continue;
+
+        var rowId = go->BaseId;
+        if (!_furnitureRowCache.TryGetValue(rowId, out var cached))
+        {
+          uint itemId = 0;
+          string nm = "";
+          if (Plugin.TryGetFurnishing(rowId, out var f))
+          {
+            itemId = f.Item.Value.RowId;
+            nm = f.Item.Value.Name.ExtractText();
+          }
+          else if (Plugin.TryGetYardObject(rowId, out var y))
+          {
+            itemId = y.Item.Value.RowId;
+            nm = y.Item.Value.Name.ExtractText();
+          }
+          cached = (itemId, nm);
+          _furnitureRowCache[rowId] = cached;
+        }
+        if (cached.ItemId == 0) continue;
+
+        var isMulti = SnapRangeData.IsMultiSidedWallReceiver(cached.ItemId);
+        var itemInstances = gp->Instances.Instances;
+        var itemSize = (int)(itemInstances.Last - itemInstances.First);
+        var hadWallTris = false;
+        var itemBest = float.PositiveInfinity;
+        var itemName = "";
+
+        for (int c = 0; c < itemSize; c++)
+        {
+          var childPtr = itemInstances.First[c];
+          if (childPtr.Value == null) continue;
+          var ci = childPtr.Value->Instance;
+          if (ci == null || ci->Id.Type != InstanceType.BgPart) continue;
+          // Child transforms are WORLD-space; do not compose the group transform.
+          var childM = BuildMatrix(*ci->GetTransformImpl());
+          WalkWallTriangles(
+            (BgPartsLayoutInstance*)ci, childM, probes, limit, cached.Name,
+            ref itemBest, ref itemName, ref trTris, ref hadWallTris,
+            itemFront, acceptBackSide: false, acceptBothSides: true);
+        }
+
+        // Same embedded-census fallback the forward path uses.
+        if (!hadWallTris && SnapRangeData.IsWallReceiver(cached.ItemId))
+        {
+          var union = GetItemColliderUnion(gp);
+          if (union.HasValue)
+          {
+            var d = DistancePointToAABB(probe, union.Value);
+            if (d < itemBest) { itemBest = d; itemName = cached.Name; }
+          }
+        }
+
+        if (itemBest < float.PositiveInfinity)
+        {
+          if (isMulti)
+          {
+            if (itemBest < bestMulti) { bestMulti = itemBest; bestMultiName = itemName; bestMultiGroup = (nint)gp; }
+          }
+          else if (itemBest < bestSingle)
+          {
+            bestSingle = itemBest; bestSingleName = itemName; bestSingleGroup = (nint)gp;
+          }
+        }
+      }
+
+      // NEAREST physical surface, deliberately WITHOUT the forward path's
+      // multi-face-over-single-face class priority. The question here is "what is this
+      // item actually attached to?", and a single-face receiver at distance 0 beats a
+      // multi-face one at 0.14. Inheriting the priority would pick the further
+      // multi-face receiver and defeat the whole test - which is exactly the
+      // White Rect (multi, 0.14) vs Stage Panel (single, 0.000) case.
+      if (bestMulti <= bestSingle)
+      {
+        dist = bestMulti; name = bestMultiName; group = bestMultiGroup;
+      }
+      else
+      {
+        dist = bestSingle; name = bestSingleName; group = bestSingleGroup;
+      }
+
+      // Territory (house) walls.
+      EnsureTerritoryWallCache(allowDeep: false);
+      if (_territoryWallCache.Count == 0) EnsureTerritoryWallCache(allowDeep: true);
+
+      var terrBest = float.PositiveInfinity;
+      var terrName = "";
+      foreach (var (inst, bb) in _territoryWallCache)
+      {
+        if (DistancePointToAABB(probe, bb) > limit) continue;
+        var m = BuildMatrix(*((BgPartsLayoutInstance*)inst)->GetTransformImpl());
+        var dummy = false;
+        var wallBest = float.PositiveInfinity;
+        var wallName = "";
+        WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, limit, "house wall",
+          ref wallBest, ref wallName, ref trTris, ref dummy, itemFront, acceptBothSides: true);
+        if (wallBest < terrBest) { terrBest = wallBest; terrName = wallName; }
+      }
+
+      if (terrBest < dist)
+      {
+        dist = terrBest;
+        name = terrName;
+        group = 0;
+        isTerritory = true;
+      }
+
+      return dist <= limit;
     }
 
     private static Matrix4x4 BuildMatrix(FFXIVClientStructs.FFXIV.Client.LayoutEngine.Transform t) => t.Compose();
