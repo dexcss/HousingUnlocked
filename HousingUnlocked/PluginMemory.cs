@@ -1499,8 +1499,7 @@ namespace HousingUnlocked
             childM,
             probes, limit, cached.Name,
             ref itemBest, ref itemName, ref wallTris, ref hadWallTris,
-            itemFront, acceptBackSide: false, acceptBothSides: true,
-            frontLimit: isMultiSided ? limit : 0f, backLimit: isMultiSided ? 0.58f : 0f);
+            itemFront, acceptBackSide: false, acceptBothSides: true);
         }
 
         if (itemBest < beforeItemBest)
@@ -1852,22 +1851,15 @@ namespace HousingUnlocked
             // way; the first wall surface hit is the snap target. The facing side
             // selects which side the item is pulled out of.
             var backHit = RayTriangleHit(probe, -itemFront, a, b, c, out var tb) &&
-                          tb >= -0.1f && tb <= limit;
+                          tb >= -0.1f && tb <= limit &&
+                          Vector3.Dot(n, -itemFront) < -1e-4f; // one-sided: never a backface
             var frontHit = RayTriangleHit(probe, itemFront, a, b, c, out var tf) &&
-                           tf >= -0.1f && tf <= limit;
+                           tf >= -0.1f && tf <= limit &&
+                           Vector3.Dot(n, itemFront) < -1e-4f; // one-sided: never a backface
             if (!backHit && !frontHit) continue;
             hitBack = backHit && (!frontHit || tb <= tf);
             t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
             hitDot = Vector3.Dot(n, hitBack ? -itemFront : itemFront);
-            if (frontLimit > 0f)
-            {
-              // Multi-face receiver capture (measured on the White Rect): the
-              // face's normal side uses the full 1.0; the back side is 0.58
-              // (engine leaves the item alone at 0.61 behind but snapped 0.68
-              // in front).
-              var sideLimit = hitDot < 0f ? frontLimit : backLimit;
-              if (t > sideLimit) continue;
-            }
           }          else
           {
             // Fallback for callers that don't pass the facing axis: plain distance
