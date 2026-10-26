@@ -1682,21 +1682,14 @@ namespace HousingUnlocked
                                + MathF.Abs(singleN.Y) * e.Y
                                + MathF.Abs(singleN.Z) * e.Z);
         }
-        // PRECISE BOUNDARY, measured by the author 2026-10-27 (1 cm bracket):
-        //   Stage Panel Z=-9.2000, White Rect Z=-8.1270
-        //   lantern Z=-9.0200 -> Stage Panel   (0.067 from the panel's face)
-        //   lantern Z=-9.0100 -> White Rect    (0.077 from the panel's face)
-        // => the single-face panel only wins when the item is essentially ON it; any real
-        // gap and the multi-face receiver wins on class priority. 0.075 is the midpoint of
-        // that measured band, and it replaces the earlier side-of-plane occlusion guesses.
-        const float SINGLE_TOUCH = 0.075f;
-        // SIGNED touch band, fitted to all three of the author's observed cases:
-        //   panel face 0.067 IN FRONT (bestSingle ~ +0.067) -> Stage Panel
-        //   panel face 0.077 IN FRONT (bestSingle ~ +0.077) -> White Rect
-        //   panel face 0.017 BEHIND   (bestSingle ~ -0.017) -> White Rect
-        // So the panel wins ONLY when the item is touching its front face within 7.5 cm,
-        // and NOT when it is behind/inside it. MathF.Abs was wrong: it made every negative
-        // (behind-the-face) value win the panel, which broke the -8.6891 case.
+        // SIGNED touch band, calibrated from MEASURED distances (not assumed geometry):
+        //   hu_session_20261027_101438 at lantern Z=-8.9631 -> Stage Panel d=0.319, side=1
+        //   => the panel's near face is at Z=-9.282 (0.1129 assumption was wrong)
+        //   => at the author's flip (Z=-9.015) the panel distance is ~0.267
+        //   => panel wins at Z=-9.0200 (d~0.259), loses at Z=-9.0100 (d~0.269)
+        // Upper bound 0.265 sits between those. Lower bound 0 (>= 0f) keeps the
+        // behind-the-face case at Z=-8.6891 (d=-0.017) losing to the White Rect.
+        const float SINGLE_TOUCH = 0.265f;
         occludedBySingle = bestSingle >= 0f && bestSingle <= SINGLE_TOUCH;
       }
 
