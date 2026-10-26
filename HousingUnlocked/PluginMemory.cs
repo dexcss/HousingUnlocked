@@ -1734,7 +1734,12 @@ namespace HousingUnlocked
         var side = sideSq > 0f ? MathF.Sqrt(sideSq) : 0f;
         if (side > sideTolerance) continue; // outside the receiver's face width
 
-        var gap = along - faceHalf;
+        // The engine measures the wall item's capture to the receiver's FAR face
+        // (the one away from the wall item): with the lantern at Z=-8.50 the
+        // White Rect (half thickness 0.1129) re-attaches at pivot Z=-7.6594
+        // (0.8406 + 0.1129 = 0.9535 < 1.0) and stops at -7.5594 (1.0535 > 1.0).
+        // Subtracting the half thickness instead warned ~one partition width early.
+        var gap = along + faceHalf;
         if (gap < 0f) gap = 0f;
         if (gap > capture) continue;
 
