@@ -1676,7 +1676,14 @@ namespace HousingUnlocked
                                + MathF.Abs(singleN.Y) * e.Y
                                + MathF.Abs(singleN.Z) * e.Z);
         }
-        occludedBySingle = itemSide * multiSide < 0f && MathF.Abs(itemSide) > MathF.Max(0.05f, occPanelHalf);
+        // Calibrated from the author's visual reports, narrowing each time:
+        //   0.15 (1.15.74) -> still White Rect, so too small
+        //   panel half-thickness ~0.3 (1.15.75) -> "pushed too far back", too large
+        // Author's description of the real boundary: "just a bit past the FRONT of the
+        // stage panel". 0.20 sits between the rejected bounds; occDepth/occPanelHalf are
+        // logged so this can be pinned exactly instead of bracketed a fourth time.
+        const float OCC_DEPTH = 0.20f;
+        occludedBySingle = itemSide * multiSide < 0f && MathF.Abs(itemSide) > OCC_DEPTH;
       }
 
       if (occludedBySingle)
