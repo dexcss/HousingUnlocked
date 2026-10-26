@@ -1801,10 +1801,14 @@ namespace HousingUnlocked
       //   plugin surface distance D at that flip = 0.499  =>  surface->attach = 0.500
       // Applied to single-face receivers only, to avoid moving the multi-face thresholds
       // that are already confirmed working.
+      // Applied to BOTH receiver classes. Originally scoped to single-face to protect the
+      // multi-face thresholds, but the offset is a property of the held item (where it
+      // comes to rest), not of the receiver - and unscoping it is what fixes the partition
+      // over-warning after it was correctly reclassified as multi-face (2026-10-27).
       var wallOffset = 0f;
       if (_cachedActiveItemId != 0)
         SnapRangeData.TryGetWallThreshold(_cachedActiveItemId, out wallOffset);
-      if (wallOffset > 0f && !float.IsInfinity(bestFurn) && furnClass == "single-face")
+      if (wallOffset > 0f && !float.IsInfinity(bestFurn))
         bestFurn += wallOffset;
 
       var furnHit = bestFurn <= limit;
