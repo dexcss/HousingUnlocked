@@ -2975,7 +2975,9 @@ namespace HousingUnlocked
                         var lf = Vector3.Transform(Vector3.UnitZ, lg->Transform.Rotation);
                         FindNearestWallReceiver(lp, lf, 2f, (nint)lg, 0,
                           out var lnd, out var lnn, out _, out var lterr);
-                        lcTruth = $" nearest=\"{lnn}\"{(lterr ? "(terr)" : "")} nd={lnd:0.###} attached={(lnd <= 0.05f ? 1 : 0)}";
+                        lcTruth = $" nearest=\"{lnn}\"{(lterr ? "(terr)" : "")} nd={lnd:0.###} attached={(lnd <= 0.05f ? 1 : 0)}" +
+                                  $" predHit={(_predWallHit ? 1 : 0)} predTarget=\"{_predWallTarget}\" predD={_predWallDist:0.###} " +
+                                  $"MATCH={((_predWallHit && lnn == _predWallTarget) ? 1 : 0)}";
                       }
                     }
                     catch { }
