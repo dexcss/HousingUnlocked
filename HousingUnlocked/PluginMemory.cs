@@ -1613,8 +1613,8 @@ namespace HousingUnlocked
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic += $", multi {bestMulti:0.###} [{bestMultiName}] single {bestSingle:0.###} [{bestSingleName}], hit {_wallHitSide}";
       WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} ({probes.Count} probes); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag}";
+      WallSnapDiagnostic += $", multi {bestMulti:0.###} [{bestMultiName}] single {bestSingle:0.###} [{bestSingleName}], hit {_wallHitSide}";
 
       if (furnHit || terrHit)
       {
