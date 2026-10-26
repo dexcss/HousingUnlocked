@@ -1707,7 +1707,18 @@ namespace HousingUnlocked
           _furnitureCategoryCache[rowId] = category;
         }
         if (cached.ItemId == 0) continue;
-        if (!_furnitureCategoryCache.TryGetValue(rowId, out var cat15) || cat15 != 15) continue;
+        // The row cache is shared with the item/table/wall scans, so a row can be
+        // cached without its HousingItemCategory. Resolve the category lazily on
+        // its own so already-cached wall items are not skipped.
+        if (!_furnitureCategoryCache.TryGetValue(rowId, out var cat15))
+        {
+          uint category = 0;
+          if (Plugin.TryGetFurnishing(rowId, out var f2)) category = (uint)f2.HousingItemCategory;
+          else if (Plugin.TryGetYardObject(rowId, out var y2)) category = (uint)y2.HousingItemCategory;
+          _furnitureCategoryCache[rowId] = category;
+          cat15 = category;
+        }
+        if (cat15 != 15) continue;
 
         var group = go->SharedGroupLayoutInstance;
         if (group == null) continue;
