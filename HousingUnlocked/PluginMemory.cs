@@ -1684,7 +1684,12 @@ namespace HousingUnlocked
         // gap and the multi-face receiver wins on class priority. 0.075 is the midpoint of
         // that measured band, and it replaces the earlier side-of-plane occlusion guesses.
         const float SINGLE_TOUCH = 0.075f;
-        occludedBySingle = bestSingle <= SINGLE_TOUCH;
+        // NOTE: bestSingle is a SIGNED ray parameter and is routinely negative when the
+        // item sits slightly behind the receiver's face, so the comparison MUST use the
+        // magnitude. Without MathF.Abs, any negative value passed the test and the panel
+        // won from arbitrarily far behind (seen in hu_session_20261027_094800 at
+        // bestSingle = -0.088).
+        occludedBySingle = MathF.Abs(bestSingle) <= SINGLE_TOUCH;
       }
 
       if (occludedBySingle)
