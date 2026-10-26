@@ -846,6 +846,9 @@ namespace HousingUnlocked
       string bestName = "";
       int scanned = 0;
       int withRange = 0;
+      // DIAGNOSTIC: near-miss candidates (within effective + 0.3), so a false card or a
+      // missing card can be explained by the numbers rather than inferred.
+      var cands = new List<string>(4);
 
       for (var i = 0; i < 600; i++)
       {
@@ -898,6 +901,9 @@ namespace HousingUnlocked
         };
         if (effective <= 0f) continue;
 
+        if (dist <= effective + 0.3f && cands.Count < 4)
+          cands.Add($"{cached.Name}#{cached.ItemId}@{dist:0.###}/{effective:0.###}");
+
         // STRICT test for the "WILL SNAP" card. The safety margin (config.SnapThreshold,
         // default 0.07) is an early-warning allowance, NOT part of the engine's snap
         // range. Including it here produced false cards: measured 2026-10-26 holding the
@@ -913,7 +919,13 @@ namespace HousingUnlocked
         }
       }
 
-      ItemSnapDiagnostic = $"scanned {scanned} nearby ({withRange} snap-capable), active range {activeRange:0.####} [{ActiveItemSphereCastSource}], mode {mode}";
+      var obCtx = default(OrientedBounds);
+      active->GetOrientedBoundsImpl(&obCtx);
+      var ctxFront = Vector3.Transform(Vector3.UnitZ, active->Transform.Rotation);
+      ItemSnapDiagnostic = $"scanned {scanned} nearby ({withRange} snap-capable), active range {activeRange:0.####} [{ActiveItemSphereCastSource}], mode {mode} || " +
+        $"ctx=id:{activeItemId} cat:{_cachedActiveItemCategory} model:{_cachedActiveItemModelKey} out:{(_cachedActiveItemIsOutdoor ? 1 : 0)} " +
+        $"p=({activePos.X:0.###},{activePos.Y:0.###},{activePos.Z:0.###}) front=({ctxFront.X:0.##},{ctxFront.Y:0.##},{ctxFront.Z:0.##}) " +
+        $"half=({obCtx.HalfExtents.X:0.###},{obCtx.HalfExtents.Y:0.###},{obCtx.HalfExtents.Z:0.###}) cands=[{string.Join(";", cands)}]";
 
       if (bestId != 0)
       {
@@ -1463,6 +1475,19 @@ namespace HousingUnlocked
       AABB? bestSingleBB = null;
       var furnClass = "";
 
+      // DIAGNOSTIC: every candidate receiver within range, with the side its winning
+      // triangle was hit from. This is the data needed to explain "it says it will snap
+      // when the item is behind the wall" without guessing at the winding convention.
+      var recvLog = new List<string>(6);
+      var winN = Vector3.Zero;
+      var winP = Vector3.Zero;
+      var winT = 0f;
+      var winSide = 0;
+      var winSigned = 0f;
+      var winPerp = 0f;
+      var winIsTerr = false;
+      var winName = "";
+
       for (var i = 0; i < 600; i++)
       {
         var addr = HousingModule->GetCurrentManager()->Objects[i];
@@ -1525,6 +1550,14 @@ namespace HousingUnlocked
             itemFront, acceptBackSide: false, acceptBothSides: true);
         }
 
+        // DIAGNOSTIC: geometry of this receiver's winning triangle (see _wallGeom*).
+        var rGeomN = _wallGeomNormal;
+        var rGeomP = _wallGeomPoint;
+        var rGeomT = _wallGeomT;
+        var rGeomSide = _wallGeomSide;
+        var rGeomSigned = _wallGeomSigned;
+        var rGeomPerp = _wallGeomPerpT;
+
         if (itemBest < beforeItemBest)
         {
           var hitUnion = GetItemColliderUnion(group);
@@ -1559,15 +1592,25 @@ namespace HousingUnlocked
         // Merge this item's best into its receiver class.
         if (itemBest < float.PositiveInfinity)
         {
+          if (recvLog.Count < 6)
+            recvLog.Add($"{cached.Name}#{cached.ItemId}:{(isMultiSided ? "M" : "S")}" +
+                        $":d={itemBest:0.###}:side={rGeomSide}:sd={rGeomSigned:0.###}:perp={rGeomPerp:0.###}:t={rGeomT:0.###}");
           if (isMultiSided)
           {
-            if (itemBest < bestMulti) { bestMulti = itemBest; bestMultiName = itemName; bestMultiBB = itemBB; }
+            if (itemBest < bestMulti)
+            {
+              bestMulti = itemBest; bestMultiName = itemName; bestMultiBB = itemBB;
+              winN = rGeomN; winP = rGeomP; winT = rGeomT; winSide = rGeomSide;
+              winSigned = rGeomSigned; winPerp = rGeomPerp; winIsTerr = false; winName = itemName;
+            }
           }
           else if (itemBest < bestSingle)
           {
             bestSingle = itemBest;
             bestSingleName = itemName;
             bestSingleBB = itemBB;
+            winN = rGeomN; winP = rGeomP; winT = rGeomT; winSide = rGeomSide;
+            winSigned = rGeomSigned; winPerp = rGeomPerp; winIsTerr = false; winName = itemName;
           }
         }
       }
@@ -1626,17 +1669,26 @@ namespace HousingUnlocked
         // House walls: distance to the attachable face only — no half-space test,
         // so an item slightly behind the plane still snaps forward onto it.
         WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, territoryLimit, "house wall", ref wallBest, ref wallName, ref wallTris, ref dummy, itemFront, acceptBothSides: true);
-        terrDiag.Append($"[bb={bbDist:0.##} tri={(float.IsInfinity(wallBest) ? "-" : wallBest.ToString("0.###"))}]");
+        terrDiag.Append($"[bb={bbDist:0.##} tri={(float.IsInfinity(wallBest) ? "-" : wallBest.ToString("0.###"))} side={_wallGeomSide} sd={_wallGeomSigned:0.###}]");
         if (wallBest < bestTerr)
         {
           bestTerr = wallBest;
           bestTerrName = wallName;
+          winN = _wallGeomNormal; winP = _wallGeomPoint; winT = _wallGeomT;
+          winSide = _wallGeomSide; winSigned = _wallGeomSigned; winPerp = _wallGeomPerpT;
+          winIsTerr = true; winName = wallName;
         }
       }
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
-      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} ({probes.Count} probes); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag}";
+      var geomDiag = $"front=({itemFront.X:0.###},{itemFront.Y:0.###},{itemFront.Z:0.###}) " +
+                     $"recv=[{string.Join(";", recvLog)}] " +
+                     $"win={(winName.Length > 0 ? winName : "-")}{(winIsTerr ? "(terr)" : "")} " +
+                     $"winN=({winN.X:0.###},{winN.Y:0.###},{winN.Z:0.###}) " +
+                     $"winP=({winP.X:0.###},{winP.Y:0.###},{winP.Z:0.###}) " +
+                     $"winT={winT:0.###} winSide={winSide} winSD={winSigned:0.###} winPerp={winPerp:0.###}";
+      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} ({probes.Count} probes); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag} || {geomDiag}";
 
       if (furnHit || terrHit)
       {
@@ -1926,7 +1978,8 @@ namespace HousingUnlocked
         // then it is already there and "will snap here" is wrong.
         if (triBest <= 0.02f || riding)
         {
-          if (compLog.Count < 4) compLog.Add($"{cached.Name}->already-attached");
+          var why0 = riding ? "riding" : "embedded";
+          if (compLog.Count < 4) compLog.Add($"{cached.Name}->already-{why0}(tri={triBest:0.###})");
           continue;
         }
 
@@ -2161,6 +2214,17 @@ namespace HousingUnlocked
     /// House walls are distance-only (either side of the plane). Furniture false
     /// walls accept the back (anti-normal) side only.
     /// </summary>
+    // DIAGNOSTIC scratch: geometry of the best wall-triangle hit for the last
+    // WalkWallTriangles call. Written only when a call improves its own `best`, so it
+    // always describes that call's winning triangle. Purely observational - no rule
+    // reads it. Used to learn the mesh winding convention (which side is attachable).
+    private static Vector3 _wallGeomNormal;
+    private static Vector3 _wallGeomPoint;
+    private static float _wallGeomT;
+    private static int _wallGeomSide;   // -1 = hit along -front, +1 = along +front, 0 = plain distance
+    private static float _wallGeomSigned; // dot(triangleNormal, probe - trianglePoint)
+    private static float _wallGeomPerpT;  // unsigned point-to-triangle distance
+
     private static unsafe void WalkWallTriangles(
       BgPartsLayoutInstance* bgPart, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
@@ -2227,9 +2291,10 @@ namespace HousingUnlocked
         foreach (var probe in probes)
         {
           float t;
+          int side;
           if (acceptBothSides)
           {
-            // Multi-sided receiver � MakePlace rule (Cutest, ported):
+            // Multi-sided receiver — MakePlace rule (Cutest, ported):
             //   frontVector = rotation * (0, 100, 0)
             //   LineTraceSingleByChannel(position + frontVector, position - frontVector, WALL_CHANNEL)
             // A bidirectional line trace along the item's facing axis, 1.0 yalm each
@@ -2240,7 +2305,12 @@ namespace HousingUnlocked
             var frontHit = RayTriangleHit(probe, itemFront, a, b, c, out var tf) &&
                            tf >= -0.1f && tf <= limit;
             if (!backHit && !frontHit) continue;
-            t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
+            if (backHit && frontHit)
+            {
+              if (tb <= tf) { t = tb; side = -1; } else { t = tf; side = 1; }
+            }
+            else if (backHit) { t = tb; side = -1; }
+            else { t = tf; side = 1; }
           }          else
           {
             // Fallback for callers that don't pass the facing axis: plain distance
@@ -2251,12 +2321,22 @@ namespace HousingUnlocked
             var d = DistancePointTriangle(probe, a, b, c);
             if (d > limit) continue;
             t = d;
+            side = 0;
           }
 
           if (t < best)
           {
             best = t;
             bestName = name;
+            // DIAGNOSTIC: capture the winning triangle's geometry. This is the data
+            // needed to learn the mesh winding convention (which face is the attachable
+            // one) without guessing - see WallSnapDiagnostic.
+            _wallGeomNormal = n;
+            _wallGeomPoint = a;
+            _wallGeomT = t;
+            _wallGeomSide = side;
+            _wallGeomSigned = Vector3.Dot(n, probe - a);
+            _wallGeomPerpT = DistancePointTriangle(probe, a, b, c);
           }
         }
       }
