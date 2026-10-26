@@ -2096,7 +2096,8 @@ namespace HousingUnlocked
     /// </summary>
     private unsafe bool FindNearestWallReceiver(
       Vector3 probe, Vector3 itemFront, float limit, nint skipGroupA, nint skipGroupB,
-      out float dist, out string name, out nint group, out bool isTerritory)
+      out float dist, out string name, out nint group, out bool isTerritory,
+      List<string>? screen = null)
     {
       dist = float.PositiveInfinity;
       name = "";
@@ -2182,6 +2183,9 @@ namespace HousingUnlocked
           }
         }
 
+        if (itemBest <= limit && screen != null)
+          screen.Add($"{cached.Name}@{(isMulti ? "M" : "S")}{itemBest:0.###}");
+
         if (itemBest < float.PositiveInfinity)
         {
           if (isMulti)
@@ -2226,6 +2230,7 @@ namespace HousingUnlocked
         WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, limit, "house wall",
           ref wallBest, ref wallName, ref trTris, ref dummy, itemFront, acceptBothSides: false);
         if (wallBest < terrBest) { terrBest = wallBest; terrName = wallName; }
+        if (wallBest <= limit && screen != null) screen.Add($"house wall@{wallBest:0.###}");
       }
 
       if (terrBest < dist)
@@ -2973,11 +2978,13 @@ namespace HousingUnlocked
                       {
                         var lp = new Vector3(p.X, p.Y, p.Z);
                         var lf = Vector3.Transform(Vector3.UnitZ, lg->Transform.Rotation);
+                        var lcCands = new List<string>(8);
                         FindNearestWallReceiver(lp, lf, 2f, (nint)lg, 0,
-                          out var lnd, out var lnn, out _, out var lterr);
+                          out var lnd, out var lnn, out _, out var lterr, lcCands);
                         lcTruth = $" nearest=\"{lnn}\"{(lterr ? "(terr)" : "")} nd={lnd:0.###} attached={(lnd <= 0.05f ? 1 : 0)}" +
                                   $" predHit={(_predWallHit ? 1 : 0)} predTarget=\"{_predWallTarget}\" predD={_predWallDist:0.###} " +
-                                  $"MATCH={((_predWallHit && lnn == _predWallTarget) ? 1 : 0)}";
+                                  $"MATCH={((_predWallHit && lnn == _predWallTarget) ? 1 : 0)}" +
+                                  $" cands=[{string.Join(";", lcCands)}]";
                       }
                     }
                     catch { }
