@@ -100,6 +100,8 @@ namespace HousingUnlocked.Interface.Components
         Memory.UpdateTableSnapDetection();
       if (Configuration.ShowWallSnapWarning && activeItemId != 0)
         Memory.UpdateWallSnapDetection();
+      if (Configuration.ShowWallSnapWarning && activeItemId != 0)
+        Memory.UpdateReverseWallSnapDetection();
 
       var itemName = string.IsNullOrEmpty(Memory.LastItemSnapTargetName)
         ? SnapRangeData.GetItemName(Memory.LastItemSnapTargetItemId)
@@ -125,6 +127,13 @@ namespace HousingUnlocked.Interface.Components
 
       ImGui.Spacing();
       DrawStatusCard(shownSummary);
+
+      if (Configuration.ShowWallSnapWarning && Memory.LastReverseWallHit)
+      {
+        ImGui.TextColored(Red, $"-> {Memory.LastReverseWallNames} will snap here");
+        if (ImGui.IsItemHovered())
+          ImGui.SetTooltip("Placed wall item(s) re-attach to the item you are holding when the housing menu is closed.");
+      }
 
       ImGui.Spacing();
       ImGui.TextColored(Gold, "POSITION");

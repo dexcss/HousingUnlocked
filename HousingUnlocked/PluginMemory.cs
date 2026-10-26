@@ -233,6 +233,12 @@ namespace HousingUnlocked
     // deferred to housing-interface exit / re-instance).
     public bool LastWallSnapTargetIsTerritory { get; private set; } = false;
 
+    // ==== Reverse wall re-attachment: placed wall items that will snap to the
+    // item currently being held (the active item acting as a wall receiver) ====
+    public bool LastReverseWallHit { get; private set; } = false;
+    public string LastReverseWallNames { get; private set; } = "";
+    public string ReverseWallDiagnostic { get; private set; } = "(not computed)";
+
     // Last raycast result for the active item (for diagnostics).
     public float LastFloorRaycastDistance { get; private set; } = float.PositiveInfinity;
     public bool LastFloorRaycastHit { get; private set; } = false;
@@ -262,6 +268,9 @@ namespace HousingUnlocked
     // Filled on first sight of each placed furniture row; avoids per-frame
     // Excel RowRef dereferences during the item-snap scan.
     private readonly Dictionary<uint, (uint ItemId, string Name)> _furnitureRowCache = new();
+
+    // Cache: furniture row ID -> HousingItemCategory (15 = wall-mounted actor).
+    private readonly Dictionary<uint, uint> _furnitureCategoryCache = new();
 
     // Cache: Item RowId -> ItemUICategory row ID (78 = Tabletop, 79 = Wall-mounted,
     // per Re:MakePlace's shipped item handling). Used for table-snap detection.
@@ -1616,6 +1625,123 @@ namespace HousingUnlocked
         LastWallSnapTargetName = useFurniture ? bestFurnName : bestTerrName;
         LastWallSnapTargetIsTerritory = !useFurniture;
       }
+    }
+
+    /// <summary>
+    /// Reverse wall check. When the held item is a wall receiver (partition, stage
+    /// panel, ...), placed wall-mounted items re-attach to it when the housing
+    /// layout commits — even though their own item was never touched. The engine
+    /// uses the same front-facing rule: the wall item's front (+Z local) must point
+    /// at the receiver, and the receiver's wall face must be inside the flat wall
+    /// capture. Measured 2026-10-26: the Wall Lantern at Z=-8.50 re-attached to a
+    /// White Rect between Z=-7.6594 and -7.5594 (inside the 1.0 capture).
+    /// </summary>
+    public unsafe void UpdateReverseWallSnapDetection()
+    {
+      LastReverseWallHit = false;
+      LastReverseWallNames = "";
+      ReverseWallDiagnostic = "(not computed)";
+
+      if (HousingStructure == null || HousingStructure->ActiveItem == null ||
+          HousingModule == null || HousingModule->GetCurrentManager() == null ||
+          HousingModule->GetCurrentManager()->Objects == null)
+      {
+        ReverseWallDiagnostic = "no housing/active item";
+        return;
+      }
+
+      var active = HousingStructure->ActiveItem;
+      var activeItemId = GetActiveItemFFXIVId();
+      if (activeItemId == 0 || !SnapRangeData.IsWallReceiver(activeItemId))
+      {
+        ReverseWallDiagnostic = activeItemId == 0 ? "no active item id" : "active item is not a wall receiver";
+        return;
+      }
+
+      var config = Plugin.GetConfiguration();
+      if (!config.ShowWallSnapWarning)
+      {
+        ReverseWallDiagnostic = "wall warnings disabled";
+        return;
+      }
+
+      var capture = config.WallCaptureDistance;
+      var activePos = active->Transform.Translation;
+      var ob = default(OrientedBounds);
+      active->GetOrientedBoundsImpl(&ob);
+      var sideTolerance = MathF.Max(ob.HalfExtents.X, ob.HalfExtents.Z) + 0.5f;
+      var faceHalf = MathF.Min(ob.HalfExtents.X, ob.HalfExtents.Z);
+      var scanRadius = capture + sideTolerance + 2f;
+
+      var targets = new List<(string Name, float Gap)>();
+      for (var i = 0; i < 600; i++)
+      {
+        var addr = HousingModule->GetCurrentManager()->Objects[i];
+        if (addr == 0) continue;
+        var go = (GameObject*)addr;
+        if (go->SharedGroupLayoutInstance == active) continue;
+
+        var dist = Vector3.Distance(activePos, go->Position);
+        if (dist > scanRadius) continue;
+
+        var rowId = go->BaseId;
+        if (!_furnitureRowCache.TryGetValue(rowId, out var cached))
+        {
+          uint itemId = 0;
+          string name = "";
+          uint category = 0;
+          if (Plugin.TryGetFurnishing(rowId, out var f))
+          {
+            itemId = f.Item.Value.RowId;
+            name = f.Item.Value.Name.ExtractText();
+            category = (uint)f.HousingItemCategory;
+          }
+          else if (Plugin.TryGetYardObject(rowId, out var y))
+          {
+            itemId = y.Item.Value.RowId;
+            name = y.Item.Value.Name.ExtractText();
+            category = (uint)y.HousingItemCategory;
+          }
+          cached = (itemId, name);
+          _furnitureRowCache[rowId] = cached;
+          _furnitureCategoryCache[rowId] = category;
+        }
+        if (cached.ItemId == 0) continue;
+        if (!_furnitureCategoryCache.TryGetValue(rowId, out var cat15) || cat15 != 15) continue;
+
+        var group = go->SharedGroupLayoutInstance;
+        if (group == null) continue;
+
+        // The item's world front is +Z local (same convention as the active wall snap).
+        var front = Vector3.Transform(Vector3.UnitZ, group->Transform.Rotation);
+        var goPos = new System.Numerics.Vector3(go->Position.X, go->Position.Y, go->Position.Z);
+        var toActive = activePos - goPos;
+        var along = Vector3.Dot(front, toActive);
+        if (along <= 0f) continue; // receiver behind the wall item -> never re-attaches
+
+        var sideSq = Vector3.Dot(toActive, toActive) - along * along;
+        var side = sideSq > 0f ? MathF.Sqrt(sideSq) : 0f;
+        if (side > sideTolerance) continue; // outside the receiver's face width
+
+        var gap = along - faceHalf;
+        if (gap < 0f) gap = 0f;
+        if (gap > capture) continue;
+
+        targets.Add((cached.Name, gap));
+      }
+
+      if (targets.Count == 0)
+      {
+        ReverseWallDiagnostic = $"no wall item in capture (capture {capture:0.##}, side tol {sideTolerance:0.##})";
+        return;
+      }
+
+      targets.Sort((a, b) => a.Gap.CompareTo(b.Gap));
+      var names = string.Join(", ", targets.Take(3).Select(t => t.Name));
+      if (targets.Count > 3) names += " +" + (targets.Count - 3);
+      LastReverseWallHit = true;
+      LastReverseWallNames = names;
+      ReverseWallDiagnostic = $"{targets.Count} wall item(s) would re-attach: {names}";
     }
 
     private static Matrix4x4 BuildMatrix(FFXIVClientStructs.FFXIV.Client.LayoutEngine.Transform t) => t.Compose();
