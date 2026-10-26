@@ -1624,9 +1624,17 @@ namespace HousingUnlocked
         }
       }
 
-      // Priority (measured): multi-face receivers > single-face false walls >
-      // house walls. Distance does not decide between receiver classes.
-      if (bestMulti <= limit)
+      // Priority: the CLOSEST furniture receiver in capture, whatever its class, then
+      // furniture over house walls.
+      //
+      // CLASS PRIORITY WAS WRONG (ground truth 2026-10-27): holding the Wall Lantern
+      // with a White Rect (multi-face) at ray 0.816 and a Stage Panel (single-face)
+      // actually touching it (nd=0), the engine attached to the STAGE PANEL:
+      //   layout_change baseId=196927 nearest="Stage Panel" nd=0 attached=1
+      // while the card predicted "White Rect". The old rule let multi-face win on class
+      // alone, which is the "says it will snap to the White Rect when it snaps to the
+      // Stage Panel" report. Distance decides within furniture.
+      if (bestMulti <= limit && bestMulti <= bestSingle)
       {
         bestFurn = bestMulti;
         bestFurnName = bestMultiName;
