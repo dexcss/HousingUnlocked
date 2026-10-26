@@ -1510,6 +1510,12 @@ namespace HousingUnlocked
       // White Rect). That is a side-of-plane test, not a distance test.
       var multiN = Vector3.Zero; var multiP = Vector3.Zero; var multiPos = Vector3.Zero;
       var singleN = Vector3.Zero; var singleP = Vector3.Zero; var singlePos = Vector3.Zero;
+      // STRAIGHT-LINE distance per class. The ray parameter `bestMulti` grows large at
+      // oblique angles, which wrongly put an in-range White Rect out of capture and let
+      // the Stage Panel win by default (seen at lantern Z=-8.6891: Euclidean 0.562 but
+      // ray > 1.0). Capture for the multi-face receiver must use the Euclidean distance.
+      var multiPerp = float.PositiveInfinity;
+      var singlePerp = float.PositiveInfinity;
 
       for (var i = 0; i < 600; i++)
       {
@@ -1625,7 +1631,7 @@ namespace HousingUnlocked
               bestMulti = itemBest; bestMultiName = itemName; bestMultiBB = itemBB;
               winN = rGeomN; winP = rGeomP; winT = rGeomT; winSide = rGeomSide;
               winSigned = rGeomSigned; winPerp = rGeomPerp; winIsTerr = false; winName = itemName;
-              multiN = rGeomN; multiP = rGeomP;
+              multiN = rGeomN; multiP = rGeomP; multiPerp = rGeomPerp;
               multiPos = new Vector3(go->Position.X, go->Position.Y, go->Position.Z);
             }
           }
@@ -1636,7 +1642,7 @@ namespace HousingUnlocked
             bestSingleBB = itemBB;
             winN = rGeomN; winP = rGeomP; winT = rGeomT; winSide = rGeomSide;
             winSigned = rGeomSigned; winPerp = rGeomPerp; winIsTerr = false; winName = itemName;
-            singleN = rGeomN; singleP = rGeomP;
+            singleN = rGeomN; singleP = rGeomP; singlePerp = rGeomPerp;
             singlePos = new Vector3(go->Position.X, go->Position.Y, go->Position.Z);
           }
         }
@@ -1699,7 +1705,7 @@ namespace HousingUnlocked
         bestFurnBB = bestSingleBB;
         furnClass = "single-face (occludes multi)";
       }
-      else if (bestMulti <= limit)
+      else if (bestMulti <= limit || multiPerp <= limit)
       {
         bestFurn = bestMulti;
         bestFurnName = bestMultiName;
