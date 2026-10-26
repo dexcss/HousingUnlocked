@@ -1856,6 +1856,10 @@ namespace HousingUnlocked
             hitBack = backHit && (!frontHit || tb <= tf);
             t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
             hitDot = Vector3.Dot(n, hitBack ? -itemFront : itemFront);
+            // Oblique gate: the engine stops attaching past ~65 deg from the wall
+            // normal even when the ray distance is tiny (measured 2026-10-26: at
+            // yaw 70 / 0.16 from the partition it never attaches; yaw 0 snaps).
+            if (MathF.Abs(hitDot) < 0.4226f) continue;
           }          else
           {
             // Fallback for callers that don't pass the facing axis: plain distance
