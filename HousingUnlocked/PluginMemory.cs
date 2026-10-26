@@ -1843,6 +1843,13 @@ namespace HousingUnlocked
                            tf >= -0.1f && tf <= limit;
             if (!backHit && !frontHit) continue;
             t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
+            // Oblique gate (measured 2026-10-26, White Rect at yaw 70: 12/12 menu
+            // exits at 0.03-0.5 distance never attached, while square-on attaches
+            // out to 1.0): the effective capture shrinks with the angle between
+            // the item's facing and the wall normal - full 1.0 square-on, ~0.34
+            // at 70 deg.
+            var facing = MathF.Abs(Vector3.Dot(n, itemFront));
+            if (t > limit * facing) continue;
           }          else
           {
             // Fallback for callers that don't pass the facing axis: plain distance
