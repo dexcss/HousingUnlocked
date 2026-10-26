@@ -228,9 +228,6 @@ namespace HousingUnlocked
     public float LastWallSnapThreshold { get; private set; } = 0f;
     public string WallSnapDiagnostic { get; private set; } = "(not computed)";
 
-    // Diagnostic: side/normal of the wall triangle that last won the scan.
-    private static string _wallHitSide = "";
-
     // True when the wall target is the house's own territory walls (snap applies
     // on deselect); false when it is a furniture false wall (attachment is
     // deferred to housing-interface exit / re-instance).
@@ -1499,8 +1496,7 @@ namespace HousingUnlocked
             childM,
             probes, limit, cached.Name,
             ref itemBest, ref itemName, ref wallTris, ref hadWallTris,
-            itemFront, acceptBackSide: false, acceptBothSides: true,
-            frontLimit: isMultiSided ? 0.177f : 0f, backLimit: isMultiSided ? 0.177f : 0f);
+            itemFront, acceptBackSide: false, acceptBothSides: true);
         }
 
         if (itemBest < beforeItemBest)
@@ -1615,7 +1611,6 @@ namespace HousingUnlocked
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
       WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} ({probes.Count} probes); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag}";
-      WallSnapDiagnostic += $", multi {bestMulti:0.###} [{bestMultiName}] single {bestSingle:0.###} [{bestSingleName}], hit {_wallHitSide}";
 
       if (furnHit || terrHit)
       {
@@ -1739,12 +1734,7 @@ namespace HousingUnlocked
         var side = sideSq > 0f ? MathF.Sqrt(sideSq) : 0f;
         if (side > sideTolerance) continue; // outside the receiver's face width
 
-        // The engine measures the wall item's capture to the receiver's FAR face
-        // (the one away from the wall item): with the lantern at Z=-8.50 the
-        // White Rect (half thickness 0.1129) re-attaches at pivot Z=-7.6594
-        // (0.8406 + 0.1129 = 0.9535 < 1.0) and stops at -7.5594 (1.0535 > 1.0).
-        // Subtracting the half thickness instead warned ~one partition width early.
-        var gap = along + faceHalf;
+        var gap = along - faceHalf;
         if (gap < 0f) gap = 0f;
         if (gap > capture) continue;
 
@@ -1776,8 +1766,7 @@ namespace HousingUnlocked
     private static unsafe void WalkWallTriangles(
       BgPartsLayoutInstance* bgPart, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      Vector3 itemFront, bool acceptBackSide = false, bool acceptBothSides = false,
-      float frontLimit = 0f, float backLimit = 0f)
+      Vector3 itemFront, bool acceptBackSide = false, bool acceptBothSides = false)
     {
       var collider = bgPart->Collider;
       if (collider == null || collider->GetColliderType() != ColliderType.Mesh) return;
@@ -1786,14 +1775,13 @@ namespace HousingUnlocked
       var pcb = (MeshPCB*)meshCol->Mesh;
       if (pcb->RootNode == null) return;
 
-      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides, itemFront, frontLimit, backLimit);
+      WalkNode(pcb->RootNode, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, new HashSet<nint>(), 0, acceptBackSide, acceptBothSides, itemFront);
     }
 
     private static unsafe void WalkNode(
       MeshPCB.FileNode* node, Matrix4x4 world, List<Vector3> probes, float limit,
       string name, ref float best, ref string bestName, ref int wallTris, ref bool anyWall,
-      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides, Vector3 itemFront,
-      float frontLimit = 0f, float backLimit = 0f)
+      HashSet<nint> visited, int depth, bool acceptBackSide, bool acceptBothSides, Vector3 itemFront)
     {
       if (node == null || depth > 64) return;
       if (!visited.Add((nint)node)) return;
@@ -1841,8 +1829,6 @@ namespace HousingUnlocked
         foreach (var probe in probes)
         {
           float t;
-          var hitBack = false;
-          var hitDot = 0f;
           if (acceptBothSides)
           {
             // Multi-sided receiver � MakePlace rule (Cutest, ported):
@@ -1856,17 +1842,7 @@ namespace HousingUnlocked
             var frontHit = RayTriangleHit(probe, itemFront, a, b, c, out var tf) &&
                            tf >= -0.1f && tf <= limit;
             if (!backHit && !frontHit) continue;
-            hitBack = backHit && (!frontHit || tb <= tf);
             t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
-            hitDot = Vector3.Dot(n, hitBack ? -itemFront : itemFront);
-            if (frontLimit > 0f)
-            {
-              // Multi-face receiver capture (measured 2026-10-26, White Rect at
-              // yaw 70: snaps at 0.10-0.16 on both sides, never at 0.54/0.73):
-              // a flat 0.177 on either side of the face.
-              var sideLimit = hitDot < 0f ? frontLimit : backLimit;
-              if (t > sideLimit) continue;
-            }
           }          else
           {
             // Fallback for callers that don't pass the facing axis: plain distance
@@ -1883,13 +1859,12 @@ namespace HousingUnlocked
           {
             best = t;
             bestName = name;
-            _wallHitSide = $"{name} {(hitBack ? "back" : "front")} n.d={hitDot:0.00}";
           }
         }
       }
 
-      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront, frontLimit, backLimit);
-      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront, frontLimit, backLimit);
+      WalkNode(node->Child1, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
+      WalkNode(node->Child2, world, probes, limit, name, ref best, ref bestName, ref wallTris, ref anyWall, visited, depth + 1, acceptBackSide, acceptBothSides, itemFront);
     }
 
     /// <summary>Möller–Trumbore ray/triangle intersection (no back-face culling).</summary>
