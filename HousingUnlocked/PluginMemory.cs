@@ -1823,15 +1823,15 @@ namespace HousingUnlocked
       //   plugin surface distance D at that flip = 0.499  =>  surface->attach = 0.500
       // Applied to single-face receivers only, to avoid moving the multi-face thresholds
       // that are already confirmed working.
-      // Applied to BOTH receiver classes. Originally scoped to single-face to protect the
-      // multi-face thresholds, but the offset is a property of the held item (where it
-      // comes to rest), not of the receiver - and unscoping it is what fixes the partition
-      // over-warning after it was correctly reclassified as multi-face (2026-10-27).
+      // REMOVED (v1.15.96): the wallOffset add-back from 1.15.92 is no longer valid.
+      // It existed because the distance was measured to the receiver's wall SURFACE while
+      // the engine measures from the ATTACH point. The hollow-model change (1.15.93/94)
+      // now measures the perpendicular distance to the snap PLANE itself, which IS the
+      // engine's reference - so adding the offset double-counts. Observed at lantern
+      // Z=-9.0131: White Rect at 0.773 (inside capture) + 0.5 = 1.273 -> wrongly "no snap".
       var wallOffset = 0f;
       if (_cachedActiveItemId != 0)
         SnapRangeData.TryGetWallThreshold(_cachedActiveItemId, out wallOffset);
-      if (wallOffset > 0f && !float.IsInfinity(bestFurn))
-        bestFurn += wallOffset;
 
       // STRICT comparison: the engine snaps at 0.99 but NOT at exactly 1.0 (author,
       // 2026-10-27). Using <= accepted the boundary itself and produced a false positive
