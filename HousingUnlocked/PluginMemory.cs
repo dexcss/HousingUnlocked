@@ -1516,6 +1516,12 @@ namespace HousingUnlocked
       // ray > 1.0). Capture for the multi-face receiver must use the Euclidean distance.
       var multiPerp = float.PositiveInfinity;
       var singlePerp = float.PositiveInfinity;
+      // DIAGNOSTIC: nearest object in the scan at all (regardless of whether it resolved
+      // to a known furnishing). If a receiver is "invisible", this shows whether the object
+      // is even present and how close it is, separating a cache/resolution drop from a
+      // triangle-walk miss.
+      uint nearId = 0;
+      var nearDist = float.MaxValue;
 
       for (var i = 0; i < 600; i++)
       {
@@ -1523,7 +1529,9 @@ namespace HousingUnlocked
         if (addr == 0) continue;
         var go = (GameObject*)addr;
         if (go->SharedGroupLayoutInstance == active) continue;
-        if (Vector3.Distance(pos, go->Position) > 8f) continue;
+        var dNear = Vector3.Distance(pos, go->Position);
+        if (dNear > 8f) continue;
+        if (dNear < nearDist) { nearDist = dNear; nearId = go->BaseId; }
 
         var rowId = go->BaseId;
         if (!_furnitureRowCache.TryGetValue(rowId, out var cached))
@@ -1786,7 +1794,7 @@ namespace HousingUnlocked
                      $"winP=({winP.X:0.###},{winP.Y:0.###},{winP.Z:0.###}) " +
                      $"winT={winT:0.###} winSide={winSide} winSD={winSigned:0.###} winPerp={winPerp:0.###} " +
                      $"occDepth={occDepth:0.###} occPanelHalf={occPanelHalf:0.###} occBlocked={(occludedBySingle ? 1 : 0)}";
-      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} ({probes.Count} probes); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag} || {geomDiag}";
+      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), nearObject id={nearId} d={(float.IsInfinity(nearDist) ? "-" : nearDist.ToString("0.###"))}, capture {capture:0.###} ({probes.Count} probes); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag} || {geomDiag}";
 
       if (furnHit || terrHit)
       {
