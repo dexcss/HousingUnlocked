@@ -1700,7 +1700,7 @@ namespace HousingUnlocked
         // smallest threshold consistent with that observation, and it restores the
         // behind-panel warning without reintroducing the touch-band oscillation (there is
         // still no rule for the FRONT side - class priority governs there).
-        const float BEHIND_DEPTH = 0.05f;
+        const float BEHIND_DEPTH = 0.25f;
         var panelSide = 0f;
         if (bestSingle <= limit && singleN != Vector3.Zero)
           panelSide = Vector3.Dot(singleN, probes[0] - singleP);
