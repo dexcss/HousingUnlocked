@@ -2744,9 +2744,12 @@ namespace HousingUnlocked
         var lastIsHousingOpen = _isHousingOpen;
         _isHousingOpen = IsHousingOpen();
 
-        // Housing interface closed: the engine applies DEFERRED snaps here (items
-        // pushed into the floor get pulled onto the floor only when placement mode
-        // ends). Diff the layout snapshot immediately and log every movement.
+        // Housing interface closed: the engine applies DEFERRED snaps HERE, not on
+        // deselect. Confirmed by the author 2026-10-27: "it doesn't snap until I press
+        // escape and exit the housing" (and tabletop items can need exiting and
+        // re-entering the house). So THIS is the only valid moment to measure whether a
+        // wall item actually attached - measuring at deselect reads pre-snap state and
+        // makes every prediction look like a false positive.
         if (lastIsHousingOpen && !_isHousingOpen)
         {
           var mgrExit = HousingModule != null ? HousingModule->GetCurrentManager() : null;
@@ -2762,8 +2765,25 @@ namespace HousingUnlocked
               if (_lastLayoutSnapshot.TryGetValue(key, out var prev))
               {
                 if (Vector3.Distance(p, prev) > 0.0005f)
+                {
+                  // Post-exit truth: how far is it from the nearest wall surface now?
+                  var exitTruth = "";
+                  try
+                  {
+                    var eg = go->SharedGroupLayoutInstance;
+                    if (eg != null)
+                    {
+                      var ep = new Vector3(p.X, p.Y, p.Z);
+                      var ef = Vector3.Transform(Vector3.UnitZ, eg->Transform.Rotation);
+                      FindNearestWallReceiver(ep, ef, 2f, (nint)eg, 0,
+                        out var end, out var enn, out _, out var eterr);
+                      exitTruth = $" nearest=\"{enn}\"{(eterr ? "(terr)" : "")} nd={end:0.###} attached={(end <= 0.05f ? 1 : 0)}";
+                    }
+                  }
+                  catch { }
                   SnapLogger.Event("housing_exit_snap",
-                    $"baseId={go->BaseId} before=[{prev.X:0.####},{prev.Y:0.####},{prev.Z:0.####}] after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}]");
+                    $"baseId={go->BaseId} before=[{prev.X:0.####},{prev.Y:0.####},{prev.Z:0.####}] after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}]{exitTruth}");
+                }
                 _lastLayoutSnapshot[key] = p;
               }
             }
@@ -2857,9 +2877,14 @@ namespace HousingUnlocked
                       FindNearestWallReceiver(pp, pf, 2f, (nint)pg, 0,
                         out var nd, out var nn, out _, out var isTerr);
                       var attached = nd <= 0.05f ? 1 : 0;
+                      // PRE-SNAP ONLY: the engine applies wall snaps when the housing
+                      // interface EXITS, not on deselect, so this reading is taken before
+                      // the snap and is NOT the verdict. The authoritative one is on
+                      // housing_exit_snap. Named explicitly so it cannot be misread.
                       truthDiag = $" predicted={(_predWallHit ? 1 : 0)} predTarget=\"{_predWallTarget}\" " +
                                   $"predD={_predWallDist:0.###} predTerr={(_predWallIsTerritory ? 1 : 0)} " +
-                                  $"nearest=\"{nn}\"{(isTerr ? "(terr)" : "")} nd={nd:0.###} attached={attached}";
+                                  $"nearest=\"{nn}\"{(isTerr ? "(terr)" : "")} ndPreSnap={nd:0.###} preSnapAttached={attached} " +
+                                  $"(NOT the verdict - snaps apply on housing exit)";
                     }
                   }
                   catch { }
@@ -2910,8 +2935,29 @@ namespace HousingUnlocked
                 if (_lastLayoutSnapshot.TryGetValue(key, out var prev))
                 {
                   if (Vector3.Distance(p, prev) > 0.0005f)
+                  {
+                    // THIS is where the deferred wall snap actually lands: re-entering the
+                    // house re-instances placed items and the engine resolves the attach
+                    // here (confirmed 2026-10-27 - the lantern sat 0.25-0.33 off the wall
+                    // on deselect and moved onto the wall on the next entry). Log the
+                    // resulting attachment state so it can be compared to the prediction.
+                    var lcTruth = "";
+                    try
+                    {
+                      var lg = go->SharedGroupLayoutInstance;
+                      if (lg != null)
+                      {
+                        var lp = new Vector3(p.X, p.Y, p.Z);
+                        var lf = Vector3.Transform(Vector3.UnitZ, lg->Transform.Rotation);
+                        FindNearestWallReceiver(lp, lf, 2f, (nint)lg, 0,
+                          out var lnd, out var lnn, out _, out var lterr);
+                        lcTruth = $" nearest=\"{lnn}\"{(lterr ? "(terr)" : "")} nd={lnd:0.###} attached={(lnd <= 0.05f ? 1 : 0)}";
+                      }
+                    }
+                    catch { }
                     SnapLogger.Event("layout_change",
-                      $"baseId={go->BaseId} before=[{prev.X:0.####},{prev.Y:0.####},{prev.Z:0.####}] after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}]");
+                      $"baseId={go->BaseId} before=[{prev.X:0.####},{prev.Y:0.####},{prev.Z:0.####}] after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}]{lcTruth}");
+                  }
                 }
                 _lastLayoutSnapshot[key] = p;
               }
