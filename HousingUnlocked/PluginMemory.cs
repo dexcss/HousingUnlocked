@@ -1715,6 +1715,19 @@ namespace HousingUnlocked
         occludedBySingle = panelSide < -BEHIND_DEPTH;
       }
 
+      // HOLLOW MULTI-FACE MODEL (author, 2026-10-27):
+      //   "you can think of each multi directional as HOLLOW, each wall on the partition
+      //    surrounding it has a snap wall ~0.001 thick. If you move 1 away from that it
+      //    wont snap in either direction as long as it would attach to that snap wall and
+      //    its direction is lined up with it."
+      // So the multi-face distance is the PERPENDICULAR distance to the winning face's snap
+      // PLANE, valid on BOTH sides of it - not the ray parameter along the item's facing
+      // axis, which grows without bound when the item faces away or is inside the hollow.
+      var multiPlaneDist = float.PositiveInfinity;
+      if (multiN != Vector3.Zero && multiP != Vector3.Zero)
+        multiPlaneDist = MathF.Abs(Vector3.Dot(multiN, probes[0] - multiP));
+      if (multiPlaneDist < bestMulti) bestMulti = multiPlaneDist;
+
       if (occludedBySingle)
       {
         bestFurn = bestSingle;
