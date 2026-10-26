@@ -228,6 +228,9 @@ namespace HousingUnlocked
     public float LastWallSnapThreshold { get; private set; } = 0f;
     public string WallSnapDiagnostic { get; private set; } = "(not computed)";
 
+    // Diagnostic: side/normal of the wall triangle that last won the scan.
+    private static string _wallHitSide = "";
+
     // True when the wall target is the house's own territory walls (snap applies
     // on deselect); false when it is a furniture false wall (attachment is
     // deferred to housing-interface exit / re-instance).
@@ -1610,6 +1613,7 @@ namespace HousingUnlocked
 
       var furnHit = bestFurn <= limit;
       var terrHit = bestTerr <= territoryLimit;
+      WallSnapDiagnostic += $", multi {bestMulti:0.###} [{bestMultiName}] single {bestSingle:0.###} [{bestSingleName}], hit {_wallHitSide}";
       WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} ({probes.Count} probes); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag}";
 
       if (furnHit || terrHit)
@@ -1834,6 +1838,8 @@ namespace HousingUnlocked
         foreach (var probe in probes)
         {
           float t;
+          var hitBack = false;
+          var hitDot = 0f;
           if (acceptBothSides)
           {
             // Multi-sided receiver � MakePlace rule (Cutest, ported):
@@ -1847,7 +1853,9 @@ namespace HousingUnlocked
             var frontHit = RayTriangleHit(probe, itemFront, a, b, c, out var tf) &&
                            tf >= -0.1f && tf <= limit;
             if (!backHit && !frontHit) continue;
+            hitBack = backHit && (!frontHit || tb <= tf);
             t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
+            hitDot = Vector3.Dot(n, hitBack ? -itemFront : itemFront);
           }          else
           {
             // Fallback for callers that don't pass the facing axis: plain distance
@@ -1864,6 +1872,7 @@ namespace HousingUnlocked
           {
             best = t;
             bestName = name;
+            _wallHitSide = $"{name} {(hitBack ? "back" : "front")} n.d={hitDot:0.00}";
           }
         }
       }
