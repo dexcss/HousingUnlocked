@@ -1676,14 +1676,15 @@ namespace HousingUnlocked
                                + MathF.Abs(singleN.Y) * e.Y
                                + MathF.Abs(singleN.Z) * e.Z);
         }
-        // Calibrated from the author's visual reports, narrowing each time:
-        //   0.15 (1.15.74) -> still White Rect, so too small
-        //   panel half-thickness ~0.3 (1.15.75) -> "pushed too far back", too large
-        // Author's description of the real boundary: "just a bit past the FRONT of the
-        // stage panel". 0.20 sits between the rejected bounds; occDepth/occPanelHalf are
-        // logged so this can be pinned exactly instead of bracketed a fourth time.
-        const float OCC_DEPTH = 0.20f;
-        occludedBySingle = itemSide * multiSide < 0f && MathF.Abs(itemSide) > OCC_DEPTH;
+        // PRECISE BOUNDARY, measured by the author 2026-10-27 (1 cm bracket):
+        //   Stage Panel Z=-9.2000, White Rect Z=-8.1270
+        //   lantern Z=-9.0200 -> Stage Panel   (0.067 from the panel's face)
+        //   lantern Z=-9.0100 -> White Rect    (0.077 from the panel's face)
+        // => the single-face panel only wins when the item is essentially ON it; any real
+        // gap and the multi-face receiver wins on class priority. 0.075 is the midpoint of
+        // that measured band, and it replaces the earlier side-of-plane occlusion guesses.
+        const float SINGLE_TOUCH = 0.075f;
+        occludedBySingle = bestSingle <= SINGLE_TOUCH;
       }
 
       if (occludedBySingle)
