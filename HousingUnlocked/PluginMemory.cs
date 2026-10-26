@@ -325,6 +325,15 @@ namespace HousingUnlocked
     private Vector3 _lastActiveGroupPos;
     private nint _pendingPostSnapGroup;
     private uint _pendingPostSnapItemId;
+
+    // The active-wall prediction captured at the moment of deselect, so the placed
+    // item's FINAL position can be compared against what the card claimed. This makes
+    // every future test self-validating: the log records both sides without needing the
+    // tester to narrate what happened.
+    private bool _predWallHit;
+    private string _predWallTarget = "";
+    private float _predWallDist = float.PositiveInfinity;
+    private bool _predWallIsTerritory;
     private Vector3 _postSnapLast;
     private int _postSnapFrames;
     private int _postSnapStable;
@@ -2796,6 +2805,11 @@ namespace HousingUnlocked
             _postSnapLast = _lastActiveGroupPos;
             _postSnapFrames = 45;
             _postSnapStable = 0;
+            // Freeze the card's last claim for the snap_truth comparison.
+            _predWallHit = LastWallSnapHit;
+            _predWallTarget = LastWallSnapTargetName;
+            _predWallDist = LastWallSnapDistance;
+            _predWallIsTerritory = LastWallSnapTargetIsTerritory;
             SnapLogger.Event("DESELECT",
               $"item={_pendingPostSnapItemId} group=0x{_lastActiveGroup:X} " +
               $"heldPos=[{_lastActiveGroupPos.X:0.####},{_lastActiveGroupPos.Y:0.####},{_lastActiveGroupPos.Z:0.####}]");
@@ -2828,9 +2842,30 @@ namespace HousingUnlocked
                   var dx = p.X - _lastActiveGroupPos.X;
                   var dy = p.Y - _lastActiveGroupPos.Y;
                   var dz = p.Z - _lastActiveGroupPos.Z;
+                  // SNAP TRUTH: compare what the card predicted against where the item
+                  // actually ended up. `attached=1` means the placed item settled on a
+                  // wall surface (nearest receiver distance <= 5 cm), which is what a
+                  // real wall snap looks like. This removes all ambiguity from testing.
+                  var truthDiag = "";
+                  try
+                  {
+                    var pg = go->SharedGroupLayoutInstance;
+                    if (pg != null)
+                    {
+                      var pp = new Vector3(go->Position.X, go->Position.Y, go->Position.Z);
+                      var pf = Vector3.Transform(Vector3.UnitZ, pg->Transform.Rotation);
+                      FindNearestWallReceiver(pp, pf, 2f, (nint)pg, 0,
+                        out var nd, out var nn, out _, out var isTerr);
+                      var attached = nd <= 0.05f ? 1 : 0;
+                      truthDiag = $" predicted={(_predWallHit ? 1 : 0)} predTarget=\"{_predWallTarget}\" " +
+                                  $"predD={_predWallDist:0.###} predTerr={(_predWallIsTerritory ? 1 : 0)} " +
+                                  $"nearest=\"{nn}\"{(isTerr ? "(terr)" : "")} nd={nd:0.###} attached={attached}";
+                    }
+                  }
+                  catch { }
                   SnapLogger.Event("POSTSNAP_FINAL",
                     $"item={_pendingPostSnapItemId} before=[{_lastActiveGroupPos.X:0.####},{_lastActiveGroupPos.Y:0.####},{_lastActiveGroupPos.Z:0.####}] " +
-                    $"after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}] delta=[{dx:0.####},{dy:0.####},{dz:0.####}] mag={MathF.Sqrt(dx * dx + dy * dy + dz * dz):0.####}");
+                    $"after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}] delta=[{dx:0.####},{dy:0.####},{dz:0.####}] mag={MathF.Sqrt(dx * dx + dy * dy + dz * dz):0.####}{truthDiag}");
                   _pendingPostSnapGroup = 0;
                 }
                 break;
