@@ -233,6 +233,14 @@ namespace HousingUnlocked
     // deferred to housing-interface exit / re-instance).
     public bool LastWallSnapTargetIsTerritory { get; private set; } = false;
 
+    // Wall receiver STICKINESS. The engine keeps a wall item on the receiver it is
+    // already on until another is clearly closer. Both pure rules were tried and each
+    // fixed one case while breaking the other:
+    //   multi-face-first  -> predicted White Rect, engine attached Stage Panel (nd=0)
+    //   nearest-first     -> predicted Stage Panel, engine attached White Rect
+    // so the previous winner is retained unless the alternative is >=10 cm closer.
+    private string _lastWallFurnName = "";
+
     // ==== Reverse wall re-attachment: placed wall items that will snap to the
     // item currently being held (the active item acting as a wall receiver) ====
     public bool LastReverseWallHit { get; private set; } = false;
@@ -1624,29 +1632,37 @@ namespace HousingUnlocked
         }
       }
 
-      // Priority: the CLOSEST furniture receiver in capture, whatever its class, then
-      // furniture over house walls.
-      //
-      // CLASS PRIORITY WAS WRONG (ground truth 2026-10-27): holding the Wall Lantern
-      // with a White Rect (multi-face) at ray 0.816 and a Stage Panel (single-face)
-      // actually touching it (nd=0), the engine attached to the STAGE PANEL:
-      //   layout_change baseId=196927 nearest="Stage Panel" nd=0 attached=1
-      // while the card predicted "White Rect". The old rule let multi-face win on class
-      // alone, which is the "says it will snap to the White Rect when it snaps to the
-      // Stage Panel" report. Distance decides within furniture.
-      if (bestMulti <= limit && bestMulti <= bestSingle)
+      // Receiver choice with HYSTERESIS. Nearest-wins alone still lost a case the
+      // multi-face rule had won, and vice versa, so the engine evidently keeps the item
+      // on its current receiver until another is clearly better. Approximate that:
+      // prefer the closest in-capture receiver, but stay on the previously chosen one
+      // unless the alternative is >= 10 cm closer.
+      var pickMulti = bestMulti <= limit ? bestMulti : float.PositiveInfinity;
+      var pickSingle = bestSingle <= limit ? bestSingle : float.PositiveInfinity;
+      var pickIsMulti = pickMulti <= pickSingle;
+      var pickDist = pickIsMulti ? pickMulti : pickSingle;
+      var pickName = pickIsMulti ? bestMultiName : bestSingleName;
+
+      if (_lastWallFurnName.Length > 0 && !float.IsInfinity(pickDist))
       {
-        bestFurn = bestMulti;
-        bestFurnName = bestMultiName;
-        bestFurnBB = bestMultiBB;
-        furnClass = "multi-face";
+        var lastDist = _lastWallFurnName == bestMultiName ? pickMulti
+                     : _lastWallFurnName == bestSingleName ? pickSingle
+                     : float.PositiveInfinity;
+        if (!float.IsInfinity(lastDist) && lastDist <= pickDist + 0.10f)
+        {
+          pickIsMulti = _lastWallFurnName == bestMultiName;
+          pickDist = lastDist;
+          pickName = _lastWallFurnName;
+        }
       }
-      else if (bestSingle <= limit)
+      _lastWallFurnName = pickName;
+
+      if (!float.IsInfinity(pickDist) && pickName.Length > 0)
       {
-        bestFurn = bestSingle;
-        bestFurnName = bestSingleName;
-        bestFurnBB = bestSingleBB;
-        furnClass = "single-face";
+        bestFurn = pickDist;
+        bestFurnName = pickName;
+        bestFurnBB = pickIsMulti ? bestMultiBB : bestSingleBB;
+        furnClass = (pickIsMulti ? "multi-face" : "single-face") + " (sticky)";
       }
       else
       {
