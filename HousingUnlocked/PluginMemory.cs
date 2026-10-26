@@ -1689,8 +1689,17 @@ namespace HousingUnlocked
         //   => panel wins at Z=-9.0200 (d~0.259), loses at Z=-9.0100 (d~0.269)
         // Upper bound 0.265 sits between those. Lower bound 0 (>= 0f) keeps the
         // behind-the-face case at Z=-8.6891 (d=-0.017) losing to the White Rect.
-        const float SINGLE_TOUCH = 0.265f;
-        occludedBySingle = bestSingle >= 0f && bestSingle <= SINGLE_TOUCH;
+        // REVERTED to pure class priority (v1.15.84). The signed touch band went through
+        // 0.075 -> 0.265 and each value fixed one position while breaking another
+        // (author, 2026-10-27: "it says the stage panel in front of it and then white rect
+        // when its on the stage panel then stage panel too early behind it again").
+        // That oscillation means the single-face distance I compute is not a reliable
+        // predictor of this decision, so encoding ANY threshold on it is unstable.
+        // Class priority (territory < single-face < multi-face) is the rule the author
+        // actually stated, and it is the only version that never behaves erratically.
+        // KNOWN LIMITATION: a lantern touching the Stage Panel's front face (~0.26) is
+        // predicted as White Rect even though the engine keeps it on the panel.
+        occludedBySingle = false;
       }
 
       if (occludedBySingle)
