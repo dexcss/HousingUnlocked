@@ -1647,14 +1647,18 @@ namespace HousingUnlocked
     /// capture. Measured 2026-10-26: the Wall Lantern at Z=-8.50 re-attached to a
     /// White Rect between Z=-7.6594 and -7.5594 (inside the 1.0 capture).
     ///
-    /// GAP CONVENTION: the capture is measured to the receiver's FAR face
-    /// (along + faceHalf). That is the v1.15.41 calibration and the only reverse
-    /// boundary ever validated in-game; it is restored here after the near-face
-    /// form shipped in v1.15.52-56 produced "it says it will snap way too far away".
+    /// RULE (v1.15.58): a placed wall item is predicted to re-attach when its pivot
+    /// lies within the flat wall capture (1.0) of one of the HELD receiver's own
+    /// wall-flagged collision triangles. That is the verified forward rule with the
+    /// roles exchanged, and it deliberately does not gate on the placed item's
+    /// facing: the v1.15.57 instrumentation showed a yaw-70 lantern (front
+    /// (0.94,0,0.34), almost perpendicular to the partition's Z faces) attaching
+    /// anyway, while the old facing gate flipped the line on +/-0.01 of `along` -
+    /// off exactly where the engine attaches.
     ///
     /// The method also fills <see cref="ReverseWallFrameDiag"/> every frame with the
-    /// nearest placed wall item's live position/facing and the accept/reject reason,
-    /// so log transitions can be explained geometrically instead of guessed at.
+    /// nearest placed wall item's live transform, the new triangle distance, and the
+    /// old facing verdict side by side, so the two models can be compared per frame.
     /// </summary>
     public unsafe void UpdateReverseWallSnapDetection()
     {
@@ -1697,12 +1701,43 @@ namespace HousingUnlocked
       var faceHalf = MathF.Min(ob.HalfExtents.X, ob.HalfExtents.Z);
       var scanRadius = capture + sideTolerance + 2f;
 
-      // Diagnostic accumulators: the nearest placed wall item by |along|, recorded
-      // even when rejected, plus the reason it was rejected. This is what makes the
-      // log explainable: if the warning flips while the held item is stationary, the
-      // placed item's p=/f= values in successive revDiag strings will have moved.
+      // ROLE-SWAPPED RECEIVER WALK. The held item is the receiver and each placed
+      // wall item's pivot is the probe - the same wall-triangle machinery the forward
+      // (verified) snap uses, with the roles exchanged. It is distance-based, so it
+      // does not depend on the placed item's own facing.
+      //
+      // Why the facing-axis test is no longer the gate (measured from the v1.15.57
+      // logs, 2026-10-26): the placed Wall Lantern sits at yaw 70, so its front is
+      // (0.94, 0, 0.34) - nearly PERPENDICULAR to the partition's Z-facing surfaces.
+      // Its front projection `along` therefore hovers at +/-0.01 and flips sign on
+      // centimetre movement: the line toggled between -8.265 and -8.260 with
+      // why=behind/ok alternating, i.e. it inverted exactly where the engine
+      // attaches. The old geometry is still logged (a=/s=/g=/why=) for comparison.
+      var activeChildPtrs = new List<nint>();
+      var activeChildMats = new List<Matrix4x4>();
+      {
+        var ai = active->Instances.Instances;
+        var childCount = (int)(ai.Last - ai.First);
+        for (var c = 0; c < childCount; c++)
+        {
+          var cp = ai.First[c];
+          if (cp.Value == null) continue;
+          var ci = cp.Value->Instance;
+          if (ci == null) continue;
+          if (ci->Id.Type != InstanceType.BgPart) continue;
+          activeChildPtrs.Add((nint)ci);
+          activeChildMats.Add(BuildMatrix(*ci->GetTransformImpl()));
+        }
+      }
+      // Read a little past the capture so the log shows how far outside a rejected
+      // candidate actually was.
+      var triLimit = capture * 2f;
+      var triProbes = new List<Vector3>(1) { default };
+
+      // Diagnostic accumulators: the nearest placed wall item, recorded even when
+      // rejected, plus both verdicts.
       var candCount = 0;
-      var nearAbs = float.PositiveInfinity;
+      var nearRank = float.PositiveInfinity;
       var nearName = "";
       var nearPos = default(Vector3);
       var nearFront = default(Vector3);
@@ -1710,6 +1745,8 @@ namespace HousingUnlocked
       var nearSide = 0f;
       var nearGap = 0f;
       var nearReason = "";
+      var nearTri = float.PositiveInfinity;
+      var nearTriTris = 0;
 
       var targets = new List<(string Name, float Gap)>();
       for (var i = 0; i < 600; i++)
@@ -1770,27 +1807,43 @@ namespace HousingUnlocked
         var sideSq = Vector3.Dot(toActive, toActive) - along * along;
         var side = sideSq > 0f ? MathF.Sqrt(sideSq) : 0f;
 
-        // FAR-FACE gap (v1.15.41 calibration, restored in 1.15.57). The capture is
-        // measured to the receiver's far face, i.e. along + faceHalf, NOT the near
-        // face. Measured 2026-10-26 with the Wall Lantern at Z=-8.50 and the White
-        // Rect approaching: the engine re-attached at along=0.84 (gap 0.955 <= 1.0)
-        // and did NOT at along=0.94 (gap 1.055 > 1.0). The near-face form
-        // (along - faceHalf) reported both as inside capture, which is exactly the
-        // "it says will snap when it is way too far away" report.
+        // Old facing-axis gap (v1.15.41 calibration). Retained for the log only.
         var gap = along + faceHalf;
         if (gap < 0f) gap = 0f;
 
         string reason;
-        if (along <= 0f) reason = "behind";            // receiver behind the item -> never re-attaches
-        else if (side > sideTolerance) reason = "side"; // outside the receiver's face width
-        else if (gap > capture) reason = "far";         // in front but outside capture
+        if (along <= 0f) reason = "behind";
+        else if (side > sideTolerance) reason = "side";
+        else if (gap > capture) reason = "far";
         else reason = "ok";
 
-        candCount++;
-        var absAlong = MathF.Abs(along);
-        if (absAlong < nearAbs)
+        // New verdict: distance from this placed item's pivot to the held receiver's
+        // wall-flagged collision triangles. This is the quantity the engine actually
+        // cares about - "is this wall item's pivot within wall capture of a wall
+        // surface" - and it is blind to the placed item's rotation.
+        var triBest = float.PositiveInfinity;
+        var triTris = 0;
+        if (activeChildPtrs.Count > 0)
         {
-          nearAbs = absAlong;
+          triProbes[0] = goPos;
+          var triAny = false;
+          var triName = "";
+          for (var c = 0; c < activeChildPtrs.Count; c++)
+          {
+            WalkWallTriangles(
+              (BgPartsLayoutInstance*)activeChildPtrs[c], activeChildMats[c],
+              triProbes, triLimit, "rel", ref triBest, ref triName, ref triTris,
+              ref triAny, front);
+          }
+        }
+
+        candCount++;
+        // Rank so that a candidate with a real triangle distance always outranks one
+        // whose receiver has no readable wall triangles.
+        var rank = float.IsPositiveInfinity(triBest) ? 1000f + MathF.Abs(along) : triBest;
+        if (rank < nearRank)
+        {
+          nearRank = rank;
           nearName = cached.Name;
           nearPos = goPos;
           nearFront = front;
@@ -1798,22 +1851,27 @@ namespace HousingUnlocked
           nearSide = side;
           nearGap = gap;
           nearReason = reason;
+          nearTri = triBest;
+          nearTriTris = triTris;
         }
 
-        if (reason != "ok") continue;
+        if (triBest > capture) continue; // placed item not within capture of this receiver
 
-        targets.Add((cached.Name, gap));
+        targets.Add((cached.Name, triBest));
       }
 
       var geomDiag =
         $"ap=({activePos.X:0.###},{activePos.Y:0.###},{activePos.Z:0.###}) " +
-        $"fh={faceHalf:0.###} sideTol={sideTolerance:0.###} cap={capture:0.###}";
+        $"fh={faceHalf:0.###} sideTol={sideTolerance:0.###} cap={capture:0.###} " +
+        $"kids={activeChildPtrs.Count}";
+      var nearTriText = float.IsInfinity(nearTri) ? "-" : nearTri.ToString("0.###");
       ReverseWallFrameDiag = candCount == 0
         ? $"n=0 {geomDiag}"
         : $"n={candCount} near=\"{nearName}\" " +
           $"p=({nearPos.X:0.###},{nearPos.Y:0.###},{nearPos.Z:0.###}) " +
           $"f=({nearFront.X:0.###},{nearFront.Y:0.###},{nearFront.Z:0.###}) " +
           $"a={nearAlong:0.###} s={nearSide:0.###} g={nearGap:0.###} why={nearReason} " +
+          $"tri={nearTriText} tris={nearTriTris} " +
           geomDiag;
 
       if (targets.Count == 0)
