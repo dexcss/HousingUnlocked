@@ -1500,7 +1500,7 @@ namespace HousingUnlocked
             probes, limit, cached.Name,
             ref itemBest, ref itemName, ref wallTris, ref hadWallTris,
             itemFront, acceptBackSide: false, acceptBothSides: true,
-            frontLimit: isMultiSided ? 0.177f : 0f, backLimit: isMultiSided ? 0.58f : 0f);
+            frontLimit: isMultiSided ? limit : 0f, backLimit: isMultiSided ? 0.58f : 0f);
         }
 
         if (itemBest < beforeItemBest)
@@ -1861,9 +1861,10 @@ namespace HousingUnlocked
             hitDot = Vector3.Dot(n, hitBack ? -itemFront : itemFront);
             if (frontLimit > 0f)
             {
-              // Multi-face receiver capture (measured on the White Rect):
-              // 0.177 on the face's normal side, 0.58 on the back side. Beyond
-              // that the engine leaves the item where it is.
+              // Multi-face receiver capture (measured on the White Rect): the
+              // face's normal side uses the full 1.0; the back side is 0.58
+              // (engine leaves the item alone at 0.61 behind but snapped 0.68
+              // in front).
               var sideLimit = hitDot < 0f ? frontLimit : backLimit;
               if (t > sideLimit) continue;
             }
