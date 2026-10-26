@@ -1689,17 +1689,22 @@ namespace HousingUnlocked
         //   => panel wins at Z=-9.0200 (d~0.259), loses at Z=-9.0100 (d~0.269)
         // Upper bound 0.265 sits between those. Lower bound 0 (>= 0f) keeps the
         // behind-the-face case at Z=-8.6891 (d=-0.017) losing to the White Rect.
-        // REVERTED to pure class priority (v1.15.84). The signed touch band went through
-        // 0.075 -> 0.265 and each value fixed one position while breaking another
-        // (author, 2026-10-27: "it says the stage panel in front of it and then white rect
-        // when its on the stage panel then stage panel too early behind it again").
-        // That oscillation means the single-face distance I compute is not a reliable
-        // predictor of this decision, so encoding ANY threshold on it is unstable.
-        // Class priority (territory < single-face < multi-face) is the rule the author
-        // actually stated, and it is the only version that never behaves erratically.
-        // KNOWN LIMITATION: a lantern touching the Stage Panel's front face (~0.26) is
-        // predicted as White Rect even though the engine keeps it on the panel.
-        occludedBySingle = false;
+        // BEHIND-THE-PANEL RULE (v1.15.85). Pure class priority handled every case except
+        // the item being BEHIND the Stage Panel, where the engine keeps it on the panel
+        // (author: "it wont show me the stage panel snap behind the stage panel").
+        //
+        // This uses the SIGNED side of the panel's face, which is the one quantity that
+        // behaved consistently (logged as sd=): negative = behind/inside the face.
+        //   lantern 0.017 BEHIND the face -> sd=-0.017 -> engine chose White Rect
+        // so a small negative is NOT enough; only clearly behind counts. -0.05 is the
+        // smallest threshold consistent with that observation, and it restores the
+        // behind-panel warning without reintroducing the touch-band oscillation (there is
+        // still no rule for the FRONT side - class priority governs there).
+        const float BEHIND_DEPTH = 0.05f;
+        var panelSide = 0f;
+        if (bestSingle <= limit && singleN != Vector3.Zero)
+          panelSide = Vector3.Dot(singleN, probes[0] - singleP);
+        occludedBySingle = panelSide < -BEHIND_DEPTH;
       }
 
       if (occludedBySingle)
