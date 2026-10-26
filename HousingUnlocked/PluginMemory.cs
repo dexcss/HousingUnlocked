@@ -1658,11 +1658,18 @@ namespace HousingUnlocked
       // though multi-face has the higher class priority. Otherwise class priority holds:
       // territory < single-face < multi-face.
       var occludedBySingle = false;
+      var occDepth = 0f;
       if (bestMulti <= limit && bestSingle <= limit && singleN != Vector3.Zero)
       {
         var itemSide = Vector3.Dot(singleN, probes[0] - singleP);
         var multiSide = Vector3.Dot(singleN, multiPos - singleP);
-        occludedBySingle = itemSide * multiSide < 0f;
+        occDepth = itemSide;
+        // The multi-face receiver still wins slightly PAST the panel's plane (author,
+        // 2026-10-27: "slightly in it still snaps up to the white rect"), so its capture
+        // reaches a little through the panel. Only treat the panel as blocking once the
+        // item is more than OCC_MARGIN behind the plane.
+        const float OCC_MARGIN = 0.15f;
+        occludedBySingle = itemSide * multiSide < 0f && MathF.Abs(itemSide) > OCC_MARGIN;
       }
 
       if (occludedBySingle)
@@ -1742,7 +1749,8 @@ namespace HousingUnlocked
                      $"win={(winName.Length > 0 ? winName : "-")}{(winIsTerr ? "(terr)" : "")} " +
                      $"winN=({winN.X:0.###},{winN.Y:0.###},{winN.Z:0.###}) " +
                      $"winP=({winP.X:0.###},{winP.Y:0.###},{winP.Z:0.###}) " +
-                     $"winT={winT:0.###} winSide={winSide} winSD={winSigned:0.###} winPerp={winPerp:0.###}";
+                     $"winT={winT:0.###} winSide={winSide} winSD={winSigned:0.###} winPerp={winPerp:0.###} " +
+                     $"occDepth={occDepth:0.###} occBlocked={(occludedBySingle ? 1 : 0)}";
       WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), capture {capture:0.###} ({probes.Count} probes); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag} || {geomDiag}";
 
       if (furnHit || terrHit)
