@@ -1632,15 +1632,18 @@ namespace HousingUnlocked
         }
       }
 
-      // RECEIVER RULE, FITTED FROM GROUND TRUTH (2026-10-27, MATCH lines):
-      //   case 1: Stage Panel (single) 0.000 vs White Rect (multi) 0.816 -> engine chose SINGLE
-      //   case 2: Stage Panel (single) 0.513 vs White Rect (multi) 0.563 -> engine chose MULTI
-      // Case 2 shows a multi-face receiver winning while FARTHER, so class matters; case 1
-      // shows it losing by a lot, so class is not absolute. A multi-face receiver getting a
-      // ~10 cm distance handicap satisfies both: pure-nearest (H=0) misses case 2, pure
-      // class-priority (H>=0.82) misses case 1, H=0.10 fits both.
-      var multiWins = bestMulti <= limit && bestMulti <= bestSingle + 0.10f;
-      if (multiWins)
+      // RECEIVER PRIORITY — stated authoritatively by the plugin author 2026-10-27:
+      //   house wall (territory)   = LOWEST
+      //   single-face receiver     = SECOND   (Stage Panel)
+      //   multi-face receiver      = HIGHEST  (White Rectangular Partition)
+      //
+      // The class order is ABSOLUTE and distance only breaks ties WITHIN a class. This is
+      // the original rule; it was briefly abandoned because one logged case had a Stage
+      // Panel at nd=0.000 beating a White Rect at 0.816 - that is now understood as the
+      // White Rect being outside ITS OWN (smaller, magnet-like) capture rather than the
+      // class order being wrong. Do not replace this with nearest-wins again: three
+      // distance-based rules were tried and each contradicted the author's report.
+      if (bestMulti <= limit)
       {
         bestFurn = bestMulti;
         bestFurnName = bestMultiName;
