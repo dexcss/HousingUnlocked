@@ -1647,14 +1647,16 @@ namespace HousingUnlocked
     /// capture. Measured 2026-10-26: the Wall Lantern at Z=-8.50 re-attached to a
     /// White Rect between Z=-7.6594 and -7.5594 (inside the 1.0 capture).
     ///
-    /// RULE (v1.15.58): a placed wall item is predicted to re-attach when its pivot
+    /// RULE (v1.15.59): a placed wall item is predicted to re-attach when its pivot
     /// lies within the flat wall capture (1.0) of one of the HELD receiver's own
-    /// wall-flagged collision triangles. That is the verified forward rule with the
-    /// roles exchanged, and it deliberately does not gate on the placed item's
-    /// facing: the v1.15.57 instrumentation showed a yaw-70 lantern (front
-    /// (0.94,0,0.34), almost perpendicular to the partition's Z faces) attaching
-    /// anyway, while the old facing gate flipped the line on +/-0.01 of `along` -
-    /// off exactly where the engine attaches.
+    /// wall-flagged collision triangles, measured to the receiver's FAR face
+    /// (triangle distance + 2*faceHalf). That is the verified forward rule with the
+    /// roles exchanged, expressed in the same far-face convention as the only reverse
+    /// boundary ever validated in-game, and it deliberately does not gate on the
+    /// placed item's facing: the v1.15.57 instrumentation showed a yaw-70 lantern
+    /// (front (0.94,0,0.34), almost perpendicular to the partition's Z faces)
+    /// attaching anyway, while the old facing gate flipped the line on +/-0.01 of
+    /// `along` - off exactly where the engine attaches.
     ///
     /// The method also fills <see cref="ReverseWallFrameDiag"/> every frame with the
     /// nearest placed wall item's live transform, the new triangle distance, and the
@@ -1735,7 +1737,10 @@ namespace HousingUnlocked
       var triProbes = new List<Vector3>(1) { default };
 
       // Diagnostic accumulators: the nearest placed wall item, recorded even when
-      // rejected, plus both verdicts.
+      // rejected, plus BOTH verdicts per candidate. candLog lists every candidate so
+      // a name that is a false positive but not the nearest one still reaches the log
+      // (that gap is why the Stage Panel report was not diagnosable from v1.15.58).
+      var candLog = new List<string>(4);
       var candCount = 0;
       var nearRank = float.PositiveInfinity;
       var nearName = "";
@@ -1838,6 +1843,11 @@ namespace HousingUnlocked
         }
 
         candCount++;
+        if (candLog.Count < 4)
+        {
+          var shortName = cached.Name.Length > 18 ? cached.Name.Substring(0, 18) : cached.Name;
+          candLog.Add($"{shortName}@{triBest:0.##}");
+        }
         // Rank so that a candidate with a real triangle distance always outranks one
         // whose receiver has no readable wall triangles.
         var rank = float.IsPositiveInfinity(triBest) ? 1000f + MathF.Abs(along) : triBest;
@@ -1855,15 +1865,23 @@ namespace HousingUnlocked
           nearTriTris = triTris;
         }
 
-        if (triBest > capture) continue; // placed item not within capture of this receiver
+        // The triangle walk measures to the NEAREST wall triangle, i.e. the receiver's
+        // NEAR face. The only reverse boundary ever validated in-game (v1.15.41: the
+        // lantern at Z=-8.50 re-attached with the partition at along=0.8406 and did
+        // not at along=0.9406, half-thickness 0.115) is expressed to the FAR face:
+        // along + faceHalf <= 1.0. The far face is exactly 2*faceHalf beyond the near
+        // face, so apply that correction here. Without it the line fires ~0.23 too
+        // far out - which is the "still showing it too far out on the angle" report.
+        var farGap = triBest + 2f * faceHalf;
+        if (farGap > capture) continue;
 
-        targets.Add((cached.Name, triBest));
+        targets.Add((cached.Name, farGap));
       }
 
       var geomDiag =
         $"ap=({activePos.X:0.###},{activePos.Y:0.###},{activePos.Z:0.###}) " +
         $"fh={faceHalf:0.###} sideTol={sideTolerance:0.###} cap={capture:0.###} " +
-        $"kids={activeChildPtrs.Count}";
+        $"kids={activeChildPtrs.Count} cands={string.Join(",", candLog)}";
       var nearTriText = float.IsInfinity(nearTri) ? "-" : nearTri.ToString("0.###");
       ReverseWallFrameDiag = candCount == 0
         ? $"n=0 {geomDiag}"
@@ -1876,11 +1894,15 @@ namespace HousingUnlocked
 
       if (targets.Count == 0)
       {
+        ReverseWallFrameDiag += " hits=none";
         ReverseWallDiagnostic = $"no wall item in capture; {ReverseWallFrameDiag}";
         return;
       }
 
       targets.Sort((a, b) => a.Gap.CompareTo(b.Gap));
+      // Accepted targets with their far-face gap, so every name shown on the red line
+      // (or wrongly shown) is attributable to a number in the log.
+      ReverseWallFrameDiag += " hits=" + string.Join(",", targets.Take(3).Select(t => $"\"{t.Name}\"@{t.Gap:0.###}"));
       var names = string.Join(", ", targets.Take(3).Select(t => t.Name));
       if (targets.Count > 3) names += " +" + (targets.Count - 3);
       LastReverseWallHit = true;
