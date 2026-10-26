@@ -554,25 +554,6 @@ namespace HousingUnlocked
       return ok;
     }
 
-    /// <summary>
-    /// Wall-material raycast against the game's own collision (WallCollisionMesh,
-    /// material bit 20). Uses the engine's one-sided collision so backfaces never
-    /// report a hit (measured 2026-10-26 against the White Rect partition).
-    /// </summary>
-    private static unsafe bool RaycastWallMaterial(Vector3 origin, Vector3 direction, float maxDistance, out RaycastHit hit)
-    {
-      hit = default;
-      var framework = FFXIVClientStructs.FFXIV.Client.System.Framework.Framework.Instance();
-      var module = framework != null ? framework->BGCollisionModule : null;
-      if (module == null) return false;
-      var flags = stackalloc int[] { 0x100000, 0, 0x100000, 0 };
-      var o = origin;
-      var d = direction;
-      var h = default(RaycastHit);
-      var ok = module->RaycastMaterialFilter(&h, &o, &d, maxDistance, -1, flags);
-      hit = h;
-      return ok;
-    }
     public unsafe float GetDistanceToFloorBelow()
     {
       if (HousingStructure == null || HousingStructure->ActiveItem == null)
@@ -1494,18 +1475,12 @@ namespace HousingUnlocked
 
         var itemInstances = group->Instances.Instances;
         var itemSize = (int)(itemInstances.Last - itemInstances.First);
+        var hadWallTris = false;
+        var beforeItemBest = float.PositiveInfinity;
         var itemBest = float.PositiveInfinity;
         var itemName = "";
         AABB? itemBB = null;
-        var hadWallTris = false;
 
-        // Engine-accurate wall check: cast the game's own collision ray along the
-        // item's facing axis (+/-) with the WallCollisionMesh material filter and
-        // accept the hit only when it lands on this receiver's collider. This
-        // inherits the engine's one-sided collision, so backfaces never attach
-        // (measured 2026-10-26: the engine's ray finds nothing at the backface spot
-        // but hits the partition at 0.8917 from the front).
-        var receiverColliders = new List<nint>();
         for (int c = 0; c < itemSize; c++)
         {
           var childPtr = itemInstances.First[c];
@@ -1513,27 +1488,52 @@ namespace HousingUnlocked
           var ci = childPtr.Value->Instance;
           if (ci == null) continue;
           if (ci->Id.Type != InstanceType.BgPart) continue;
-          var bgPart = (BgPartsLayoutInstance*)ci;
-          if (bgPart->Collider != null) receiverColliders.Add((nint)bgPart->Collider);
+          // Child instance transforms are WORLD-space (layout engine flattens the
+          // group hierarchy — same reason TargetMarker translations compare
+          // directly against world positions). Do NOT compose with the group
+          // transform: double-applying it displaces the triangles by the item's
+          // own position/rotation (the v1.7.0.0 stage-panel height bug).
+          var childM = BuildMatrix(*ci->GetTransformImpl());
+          WalkWallTriangles(
+            (BgPartsLayoutInstance*)ci,
+            childM,
+            probes, limit, cached.Name,
+            ref itemBest, ref itemName, ref wallTris, ref hadWallTris,
+            itemFront, acceptBackSide: false, acceptBothSides: true,
+            frontLimit: isMultiSided ? limit : 0f, backLimit: isMultiSided ? 0.58f : 0f);
         }
-        if (receiverColliders.Count == 0) continue;
-        wallTris += receiverColliders.Count;
 
-        if (RaycastWallMaterial(pos, itemFront, limit, out var wallHitF) &&
-            receiverColliders.Contains((nint)wallHitF.Object) && wallHitF.Distance < itemBest)
+        if (itemBest < beforeItemBest)
         {
-          itemBest = wallHitF.Distance;
-          itemName = cached.Name;
-          itemBB = GetItemColliderUnion(group);
+          var hitUnion = GetItemColliderUnion(group);
+          if (hitUnion.HasValue)
+          {
+            itemBB = hitUnion.Value;
+            itemName = cached.Name;
+          }
         }
-        if (RaycastWallMaterial(pos, -itemFront, limit, out var wallHitB) &&
-            receiverColliders.Contains((nint)wallHitB.Object) && wallHitB.Distance < itemBest)
+        // Embedded-census fallback: known wall receiver, but no wall triangles were
+        // readable at runtime — fall back to a two-sided union-AABB check.
+        // Embedded-census fallback: known wall receiver, but no wall triangles were
+        // readable at runtime — fall back to the union-AABB distance.
+        if (!hadWallTris && SnapRangeData.IsWallReceiver(cached.ItemId))
         {
-          itemBest = wallHitB.Distance;
-          itemName = cached.Name;
-          itemBB = GetItemColliderUnion(group);
+          usedAabbFallback = true;
+          var union = GetItemColliderUnion(group);
+          if (union.HasValue)
+          {
+            foreach (var p in probes)
+            {
+              var d = DistancePointToAABB(p, union.Value);
+              if (d < itemBest)
+              {
+                itemBest = d;
+                itemName = cached.Name;
+              }
+            }
+          }
         }
-        if (itemBest < float.PositiveInfinity) hadWallTris = true;
+
         // Merge this item's best into its receiver class.
         if (itemBest < float.PositiveInfinity)
         {
@@ -1852,15 +1852,22 @@ namespace HousingUnlocked
             // way; the first wall surface hit is the snap target. The facing side
             // selects which side the item is pulled out of.
             var backHit = RayTriangleHit(probe, -itemFront, a, b, c, out var tb) &&
-                          tb >= -0.1f && tb <= limit &&
-                          Vector3.Dot(n, -itemFront) < -1e-4f; // one-sided: never a backface
+                          tb >= -0.1f && tb <= limit;
             var frontHit = RayTriangleHit(probe, itemFront, a, b, c, out var tf) &&
-                           tf >= -0.1f && tf <= limit &&
-                           Vector3.Dot(n, itemFront) < -1e-4f; // one-sided: never a backface
+                           tf >= -0.1f && tf <= limit;
             if (!backHit && !frontHit) continue;
             hitBack = backHit && (!frontHit || tb <= tf);
             t = backHit ? (frontHit ? MathF.Min(tb, tf) : tb) : tf;
             hitDot = Vector3.Dot(n, hitBack ? -itemFront : itemFront);
+            if (frontLimit > 0f)
+            {
+              // Multi-face receiver capture (measured on the White Rect): the
+              // face's normal side uses the full 1.0; the back side is 0.58
+              // (engine leaves the item alone at 0.61 behind but snapped 0.68
+              // in front).
+              var sideLimit = hitDot < 0f ? frontLimit : backLimit;
+              if (t > sideLimit) continue;
+            }
           }          else
           {
             // Fallback for callers that don't pass the facing axis: plain distance
