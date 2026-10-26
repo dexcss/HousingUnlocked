@@ -250,6 +250,16 @@ namespace HousingUnlocked
     /// </summary>
     public string ReverseWallFrameDiag { get; private set; } = "(not computed)";
 
+    // Already-attached detection for the reverse warning. A placed wall item that is
+    // RIDING ALONG with the held item is already attached to it, so "-> X will snap
+    // here" is redundant and reads as a bug. Detected by matching per-frame motion:
+    // if the candidate moved by the same delta as the held item, it is following it.
+    // (Measured 2026-10-27: the Wall Lantern tracked the dragged White Rect via
+    // layout_change events while the line kept claiming it would snap.)
+    private readonly Dictionary<nint, Vector3> _revCandLastPos = new();
+    private Vector3 _revLastActivePos;
+    private bool _revHaveActivePos;
+
     // Last raycast result for the active item (for diagnostics).
     public float LastFloorRaycastDistance { get; private set; } = float.PositiveInfinity;
     public bool LastFloorRaycastHit { get; private set; } = false;
@@ -1652,18 +1662,23 @@ namespace HousingUnlocked
     /// capture. Measured 2026-10-26: the Wall Lantern at Z=-8.50 re-attached to a
     /// White Rect between Z=-7.6594 and -7.5594 (inside the 1.0 capture).
     ///
-    /// RULE (v1.15.61) — two conditions, both required:
+    /// RULE (v1.15.62) — all conditions required:
+    ///   0. the item is NOT already attached to the held receiver — either its pivot is
+    ///      essentially ON the held receiver's surface (embedded) or it is physically
+    ///      RIDING ALONG with it (same per-frame motion delta). Measured 2026-10-27:
+    ///      the Wall Lantern tracked the dragged White Rect and the line kept claiming
+    ///      "will snap here" for something already there;
     ///   1. the placed item's pivot is within the flat wall capture (1.0) of one of the
     ///      HELD receiver's own wall-flagged triangles, measured to the FAR face
     ///      (triangle distance + 2*faceHalf) — the v1.15.41 validated convention; and
-    ///   2. the HELD receiver is the CLOSEST wall surface to that item
+    ///   2. the HELD receiver is the CLOSEST wall surface to that item by at least 1 cm
     ///      (<see cref="FindNearestWallReceiver"/>), otherwise the item simply stays
     ///      attached where it already is.
     ///
-    /// Condition 2 is what the 2026-10-26 logs demanded: the Wall Lantern held
-    /// wallD=0.000 on a Stage Panel for 960 frames while a White Rect was dragged past
-    /// it and never moved. Without it the line fires "too early" and names a receiver
-    /// the item will never use.
+    /// The competitor lookup uses PLAIN POINT-TO-TRIANGLE distance, not the forward
+    /// path's bidirectional ray: the ray returns a signed parameter that ranges over
+    /// -0.1..0, so comparing ray values across receivers made the "nearest" flip every
+    /// frame (-0.059 vs -0.000) and the line flickered off while an item was sliding in.
     ///
     /// The rule deliberately does not gate on the placed item's facing: the v1.15.57
     /// instrumentation showed a yaw-70 lantern (front (0.94,0,0.34), almost
@@ -1820,6 +1835,23 @@ namespace HousingUnlocked
         // The item's world front is +Z local (same convention as the active wall snap).
         var front = Vector3.Transform(Vector3.UnitZ, group->Transform.Rotation);
         var goPos = new System.Numerics.Vector3(go->Position.X, go->Position.Y, go->Position.Z);
+
+        // Already-attached detector: is this placed item following the held item?
+        // If it moved by (approximately) the same delta, it is riding along and is
+        // therefore already attached - nothing left to warn about.
+        var riding = false;
+        if (_revHaveActivePos && _revCandLastPos.TryGetValue((nint)group, out var prevCand))
+        {
+          var heldD = activePos - _revLastActivePos;
+          var candD = goPos - prevCand;
+          if (heldD.LengthSquared() > 4e-6f &&          // held moved > 2 mm
+              candD.LengthSquared() > 1e-6f &&         // candidate moved at all
+              (candD - heldD).LengthSquared() < 4e-4f) // same delta within 2 cm
+            riding = true;
+        }
+        if (_revCandLastPos.Count > 64) _revCandLastPos.Clear();
+        _revCandLastPos[(nint)group] = goPos;
+
         var toActive = activePos - goPos;
         var along = Vector3.Dot(front, toActive);
 
@@ -1889,6 +1921,15 @@ namespace HousingUnlocked
         var farGap = triBest + 2f * faceHalf;
         if (farGap > capture) continue;
 
+        // (0) ALREADY ATTACHED to the held receiver. If the item is embedded in it
+        // (pivot essentially on its wall surface) or physically riding along with it,
+        // then it is already there and "will snap here" is wrong.
+        if (triBest <= 0.02f || riding)
+        {
+          if (compLog.Count < 4) compLog.Add($"{cached.Name}->already-attached");
+          continue;
+        }
+
         // COMPETITOR TEST: the item only re-attaches to the held receiver if that
         // receiver is the CLOSEST wall surface to it. Otherwise it stays where it
         // already is. This is exactly the case the 2026-10-26 log showed: the Wall
@@ -1901,7 +1942,10 @@ namespace HousingUnlocked
         {
           compText = $"\"{compName}\"@{(compTerritory ? "terr" : compDist.ToString("0.###"))}";
           if (compLog.Count < 4) compLog.Add($"{cached.Name}->{compText}");
-          if (compGroup != (nint)active) continue; // stays on another receiver
+          // Suppress only when the competitor is MEANINGFULLY closer (1 cm). Ties and
+          // near-ties keep the warning: a line that vanishes while the item is sliding
+          // into place is worse than one that lingers a moment.
+          if (compGroup != (nint)active && compDist < triBest - 0.01f) continue;
         }
         else
         {
@@ -1911,6 +1955,10 @@ namespace HousingUnlocked
 
         targets.Add((cached.Name, farGap));
       }
+
+      // Commit this frame's held position for next frame's rider test.
+      _revLastActivePos = activePos;
+      _revHaveActivePos = true;
 
       var geomDiag =
         $"ap=({activePos.X:0.###},{activePos.Y:0.###},{activePos.Z:0.###}) " +
@@ -2023,10 +2071,16 @@ namespace HousingUnlocked
           if (ci == null || ci->Id.Type != InstanceType.BgPart) continue;
           // Child transforms are WORLD-space; do not compose the group transform.
           var childM = BuildMatrix(*ci->GetTransformImpl());
+          // PLAIN EUCLIDEAN DISTANCE, not the forward path's bidirectional ray. The ray
+          // returns a SIGNED parameter along the item's front axis (it is allowed to be
+          // slightly negative, -0.1..0), so comparing ray values across receivers made
+          // "which surface is nearest" flip every frame on values like -0.059 vs -0.000.
+          // Point-to-triangle is non-negative and directly comparable, which is what
+          // "what is this item attached to?" needs.
           WalkWallTriangles(
             (BgPartsLayoutInstance*)ci, childM, probes, limit, cached.Name,
             ref itemBest, ref itemName, ref trTris, ref hadWallTris,
-            itemFront, acceptBackSide: false, acceptBothSides: true);
+            itemFront, acceptBackSide: false, acceptBothSides: false);
         }
 
         // Same embedded-census fallback the forward path uses.
@@ -2082,7 +2136,7 @@ namespace HousingUnlocked
         var wallBest = float.PositiveInfinity;
         var wallName = "";
         WalkWallTriangles((BgPartsLayoutInstance*)inst, m, probes, limit, "house wall",
-          ref wallBest, ref wallName, ref trTris, ref dummy, itemFront, acceptBothSides: true);
+          ref wallBest, ref wallName, ref trTris, ref dummy, itemFront, acceptBothSides: false);
         if (wallBest < terrBest) { terrBest = wallBest; terrName = wallName; }
       }
 
