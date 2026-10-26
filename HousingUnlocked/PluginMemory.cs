@@ -1690,14 +1690,15 @@ namespace HousingUnlocked
         // gap and the multi-face receiver wins on class priority. 0.075 is the midpoint of
         // that measured band, and it replaces the earlier side-of-plane occlusion guesses.
         const float SINGLE_TOUCH = 0.075f;
-        // DISABLED (v1.15.80). The "single-face wins when the item is on it" exception was
-        // added from a misread Z sweep, and hu_session_20261027_100200 disproves it:
-        //   Stage Panel S d=-0.017 perp=0.017  (1.7 cm away, inside its front face)
-        //   White Rect  M d= 0.421
-        //   engine -> White Rect, card -> Stage Panel
-        // So class priority alone is correct: territory < single-face < multi-face, with
-        // no touch window. occludedBySingle stays as the latch for the priority block.
-        occludedBySingle = false;
+        // SIGNED touch band, fitted to all three of the author's observed cases:
+        //   panel face 0.067 IN FRONT (bestSingle ~ +0.067) -> Stage Panel
+        //   panel face 0.077 IN FRONT (bestSingle ~ +0.077) -> White Rect
+        //   panel face 0.017 BEHIND   (bestSingle ~ -0.017) -> White Rect
+        // So the panel wins ONLY when the item is touching its front face within 7.5 cm,
+        // and NOT when it is behind/inside it. MathF.Abs was wrong: it made every negative
+        // (behind-the-face) value win the panel, which broke the -8.6891 case.
+        const float SINGLE_TOUCH = 0.075f;
+        occludedBySingle = bestSingle >= 0f && bestSingle <= SINGLE_TOUCH;
       }
 
       if (occludedBySingle)
