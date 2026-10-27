@@ -1729,8 +1729,32 @@ namespace HousingUnlocked
       // across the room (author report, 2026-10-27). Use the true point-to-patch distance,
       // which is what the triangle walk already computes; it is only stale when the winning
       // distance came from the AABB fallback, which the merge now corrects.
+      // SNAP-POINT DISTANCE (v1.15.106). Author measurements, rotation 0, partition pivot Z=0.1183,
+      // lantern attaches at Z=0.3683:
+      //     lantern Z= 1.3787  -> 1.0104 from the attach point -> NO snap
+      //     lantern Z=-0.6417  -> 1.0100 from the attach point -> NO snap
+      // Both sides sit ~1.01 from the SAME point, so the engine measures from the snap point on
+      // the face the ITEM FACES - not from the nearest face. Nearest-face read 0.37 from behind
+      // and wrongly claimed a snap.
       if (!float.IsInfinity(multiPerp) && multiPerp < bestMulti) bestMulti = multiPerp;
       if (!float.IsInfinity(singlePerp) && singlePerp < bestSingle) bestSingle = singlePerp;
+
+      // Replace with distance to the snap point on the faced side, when we have the receiver AABB.
+      if (bestMultiBB.HasValue && !float.IsInfinity(bestMulti))
+      {
+        var bb = bestMultiBB.Value;
+        var bbC = (bb.Min + bb.Max) * 0.5f;
+        var bbE = (bb.Max - bb.Min) * 0.5f;
+        var ax = MathF.Abs(itemFront.X); var ay = MathF.Abs(itemFront.Y); var az = MathF.Abs(itemFront.Z);
+        Vector3 n, faceC;
+        if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, bbC.Y, bbC.Z); }
+        else if (ay >= az) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(bbC.X, bbC.Y + bbE.Y * n.Y, bbC.Z); }
+        else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(bbC.X, bbC.Y, bbC.Z + bbE.Z * n.Z); }
+        const float ITEM_DEPTH = 0.13f;
+        var attachPt = faceC - n * ITEM_DEPTH;
+        var snapD = Vector3.Distance(probes[0], attachPt);
+        if (snapD < bestMulti) bestMulti = snapD;
+      }
 
       // Same model applies to SINGLE-face receivers (author, 2026-10-27: "the stage panel
       // and one faced things are the same, just only has one wall"); its point-to-patch
