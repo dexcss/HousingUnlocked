@@ -1832,12 +1832,24 @@ namespace HousingUnlocked
       if (_cachedActiveItemId != 0)
         SnapRangeData.TryGetWallThreshold(_cachedActiveItemId, out wallOffset);
 
+      // ALIGNMENT GATE (author, 2026-10-27): a wall item only attaches to a snap wall its
+      // direction is "lined up with". Without this, an item 15 cm from a face but rotated
+      // ~70 deg off (dot 0.34) was reported as a snap it would never take
+      // (lantern X=-12.2554 Z=0.0228, front=(0.94,0,0.342) vs face normal (0,0,-1)).
+      // The dot is logged so ALIGN_MIN can be calibrated from a real boundary.
+      var alignDot = float.NaN;
+      if (!float.IsInfinity(bestFurn) && winN != Vector3.Zero)
+        alignDot = MathF.Abs(Vector3.Dot(itemFront, winN));
+      const float ALIGN_MIN = 0.7f;   // ~45 degrees
+      if (!float.IsNaN(alignDot) && alignDot < ALIGN_MIN)
+        bestFurn = float.PositiveInfinity;
+
       // STRICT comparison: the engine snaps at 0.99 but NOT at exactly 1.0 (author,
       // 2026-10-27). Using <= accepted the boundary itself and produced a false positive
       // at exactly the capture distance.
       var furnHit = bestFurn < limit;
       var terrHit = bestTerr < territoryLimit;
-      var geomDiag = $"front=({itemFront.X:0.###},{itemFront.Y:0.###},{itemFront.Z:0.###}) " +
+      var geomDiag = $"front=({itemFront.X:0.###},{itemFront.Y:0.###},{itemFront.Z:0.###}) align={(float.IsNaN(alignDot) ? "-" : alignDot.ToString("0.###"))} " +
                      $"recv=[{string.Join(";", recvLog)}] " +
                      $"win={(winName.Length > 0 ? winName : "-")}{(winIsTerr ? "(terr)" : "")} " +
                      $"winN=({winN.X:0.###},{winN.Y:0.###},{winN.Z:0.###}) " +
