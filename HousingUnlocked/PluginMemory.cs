@@ -1831,23 +1831,24 @@ namespace HousingUnlocked
       if (_cachedActiveItemId != 0)
         SnapRangeData.TryGetWallThreshold(_cachedActiveItemId, out wallOffset);
 
-      // ALIGNMENT GATE DISABLED (v1.15.99). The 0.7 threshold assumed the item must face
-      // the snap wall, but the author reports the item DOES snap at RY 70 - gating on it
-      // made the card say "no snap" at 70 deg everywhere. The dot is still logged as
-      // align= so the real relationship can be measured instead of assumed again.
+      // REACH SHRINKS WITH ANGLE (v1.15.102). The item reaches `capture` along ITS OWN
+      // axis, so the perpendicular reach to a face is capture * |cos(axis, faceNormal)|.
+      // At 0 deg the multiplier is exactly 1.0, so every confirmed-working unrotated case
+      // (including going THROUGH an item) is mathematically unchanged. At 70 deg the reach
+      // drops to ~0.34, which stops the card claiming snaps far along the wall.
+      // This is a MODIFIER on the working patch metric - not a metric swap.
       var alignDot = float.NaN;
       if (!float.IsInfinity(bestFurn) && winN != Vector3.Zero)
         alignDot = MathF.Abs(Vector3.Dot(itemFront, winN));
-      const float ALIGN_MIN = 0.0f;   // 0 = gate disabled
-      if (ALIGN_MIN > 0f && !float.IsNaN(alignDot) && alignDot < ALIGN_MIN)
-        bestFurn = float.PositiveInfinity;
+      var reachScale = float.IsNaN(alignDot) ? 1f : alignDot;
+      if (reachScale < 0.05f) reachScale = 0.05f;   // never reach 0
 
       // STRICT comparison: the engine snaps at 0.99 but NOT at exactly 1.0 (author,
       // 2026-10-27). Using <= accepted the boundary itself and produced a false positive
       // at exactly the capture distance.
-      var furnHit = bestFurn < limit;
+      var furnHit = bestFurn < limit * reachScale;
       var terrHit = bestTerr < territoryLimit;
-      var geomDiag = $"front=({itemFront.X:0.###},{itemFront.Y:0.###},{itemFront.Z:0.###}) align={(float.IsNaN(alignDot) ? "-" : alignDot.ToString("0.###"))} " +
+      var geomDiag = $"front=({itemFront.X:0.###},{itemFront.Y:0.###},{itemFront.Z:0.###}) align={(float.IsNaN(alignDot) ? "-" : alignDot.ToString("0.###"))} reach={(float.IsNaN(alignDot) ? "1" : reachScale.ToString("0.###"))} " +
                      $"recv=[{string.Join(";", recvLog)}] " +
                      $"win={(winName.Length > 0 ? winName : "-")}{(winIsTerr ? "(terr)" : "")} " +
                      $"winN=({winN.X:0.###},{winN.Y:0.###},{winN.Z:0.###}) " +
