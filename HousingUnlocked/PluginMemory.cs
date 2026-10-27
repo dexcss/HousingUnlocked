@@ -1832,16 +1832,15 @@ namespace HousingUnlocked
       if (_cachedActiveItemId != 0)
         SnapRangeData.TryGetWallThreshold(_cachedActiveItemId, out wallOffset);
 
-      // ALIGNMENT GATE (author, 2026-10-27): a wall item only attaches to a snap wall its
-      // direction is "lined up with". Without this, an item 15 cm from a face but rotated
-      // ~70 deg off (dot 0.34) was reported as a snap it would never take
-      // (lantern X=-12.2554 Z=0.0228, front=(0.94,0,0.342) vs face normal (0,0,-1)).
-      // The dot is logged so ALIGN_MIN can be calibrated from a real boundary.
+      // ALIGNMENT GATE DISABLED (v1.15.99). The 0.7 threshold assumed the item must face
+      // the snap wall, but the author reports the item DOES snap at RY 70 - gating on it
+      // made the card say "no snap" at 70 deg everywhere. The dot is still logged as
+      // align= so the real relationship can be measured instead of assumed again.
       var alignDot = float.NaN;
       if (!float.IsInfinity(bestFurn) && winN != Vector3.Zero)
         alignDot = MathF.Abs(Vector3.Dot(itemFront, winN));
-      const float ALIGN_MIN = 0.7f;   // ~45 degrees
-      if (!float.IsNaN(alignDot) && alignDot < ALIGN_MIN)
+      const float ALIGN_MIN = 0.0f;   // 0 = gate disabled
+      if (ALIGN_MIN > 0f && !float.IsNaN(alignDot) && alignDot < ALIGN_MIN)
         bestFurn = float.PositiveInfinity;
 
       // STRICT comparison: the engine snaps at 0.99 but NOT at exactly 1.0 (author,
