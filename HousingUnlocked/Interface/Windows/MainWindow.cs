@@ -19,9 +19,9 @@ namespace HousingUnlocked.Interface.Windows
     private static PluginMemory Memory => Plugin.GetMemory();
     private static Configuration Configuration => Plugin.GetConfiguration();
 
-    private static readonly Vector4 Gold = new(.95f, .78f, .35f, 1f);
-    private static readonly Vector4 Red = new(1f, .32f, .32f, 1f);
-    private static readonly Vector4 Muted = new(.62f, .62f, .66f, 1f);
+    private static readonly Vector4 Gold = Theme.Accent;
+    private static readonly Vector4 Red = Theme.Warn;
+    private static readonly Vector4 Muted = Theme.Muted;
 
     private readonly ItemControls _itemControls = new();
 
@@ -31,6 +31,7 @@ namespace HousingUnlocked.Interface.Windows
 
     public override void PreDraw()
     {
+      Theme.Push();
       // A stable minimum width keeps the window from resizing as the status text
       // changes — one source of the "flickering" feel while dragging.
       SizeConstraints = new WindowSizeConstraints
@@ -44,6 +45,8 @@ namespace HousingUnlocked.Interface.Windows
       Reset = false;
       ImGui.SetNextWindowPos(new Vector2(69, 69), ImGuiCond.Always);
     }
+
+    public override void PostDraw() => Theme.Pop();
 
     public override unsafe void Draw()
     {

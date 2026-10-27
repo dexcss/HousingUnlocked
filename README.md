@@ -1,54 +1,110 @@
 # Housing Unlocked
 
-A Dalamud plugin for FFXIV that gives you full control over placing housing items — **and tells you when the game is about to snap them out of your hands.**
+A Dalamud plugin for FFXIV housing. Full placement control (inherited from
+[BDTH](https://github.com/LeonBlade/BDTHPlugin) by LeonBlade) plus **snap prediction**: it tells you
+what the game is about to snap to **before** you let go of the item.
 
-Forked from [BDTH (Burning Down the House)](https://github.com/LeonBlade/BDTHPlugin) by LeonBlade.
+Open with `/hu`.
 
-## Snap warnings (the reason this fork exists)
+> **Under active testing.** Not a fully working product yet — features can be incomplete or behave
+> unexpectedly, especially rotated wall items. Bug reports with a session log are very welcome.
 
-The FFXIV housing engine snaps items in three different ways. Housing Unlocked decodes all three from the game's own data and warns you **before** the snap happens:
+---
 
-| Warning | Driven by | Where the data comes from |
-|---|---|---|
-| `WILL SNAP TO FLOOR` / `WILL SNAP UPWARD` | Each item's snap threshold | Regular snap: `min(width, depth) / 2` from the item's collision footprint; **SphereCastRange override** read live from the item's layout instances, with an embedded table (116 items) extracted from every housing `.sgb` in the game files |
-| `WILL SNAP TO ITEM` | Each item's SphereCastRange block (sgb type `0x4B`) | Extracted from all 1907 housing `.sgb` files — e.g. Stage Panel 0.1, Hanging Bench 0.4, arcade machines 1.0–1.5, beds 1.8, chocobo stables 2.2, Raised Wooden Deck 2.7 |
-| `WILL SNAP TO TABLE` | `TableTop` collision-material surfaces on nearby placed furniture | Read live from each placed item's colliders, incl. per-primitive material flags |
+## What it predicts
 
-All warnings support a configurable safety margin (default `0.07`) so the warning fires slightly **before** the engine's snap point.
+The FFXIV housing engine snaps items in four ways. Housing Unlocked decodes each one from the
+game's own data and shows a single status card: teal = nothing will snap, magenta = something will.
 
-The floor check is **above-first**, matching the engine: if the gap up to a floor above is within the item's distance, the item will snap upward; the floor below only applies when no floor above is in range. Drag direction does not change the result. Snaps are resolved when the housing menu is exited.
+| Warning | What drives it |
+|---|---|
+| `WILL SNAP — floor` / `floor above` | The item's authored SphereCastRange when it has one, otherwise `min(footprint X, Z) / 2` from the item's model box. The surface **above** is checked first, matching the engine. |
+| `WILL SNAP — item: X` | Both items' SphereCastRange (Either / Sum / Placed-only). |
+| `WILL SNAP — table: X` | `TableTop` collision surfaces on nearby furniture. |
+| `WILL SNAP — wall: X` | Wall-mounted items only (category 15): the receiver's own snap walls. |
+| `→ X will snap here` | Reverse warning: an already-placed wall item will re-attach to the item you are holding. |
+
+Snaps are resolved by the engine when the housing menu is exited, not on deselect — the card
+predicts accordingly.
+
+## How the wall prediction works
+
+Wall snapping is the part that needed real measurements, so it is worth stating plainly:
+
+- Receivers are **hollow**: a multi-face partition has a thin snap wall on **every** face; a
+  single-face item (Stage Panel) has one. They are not solid boxes.
+- The measured face is the one the item is against (**axis from the winning collision wall**) on
+  the side the item faces (**side from the item's front**).
+- Capture is **1.0 of travel along the item's own axis** — `perpendicular gap / |front · normal|`
+  — compared strictly (`0.99` snaps, `1.00` does not). A rotated item therefore reaches less far
+  along the wall.
+- Priority when several receivers are in range: house wall < single-face < multi-face, with a
+  single-face panel blocking a multi-face receiver once the item is more than `0.37` behind it.
+- Backfaces never attach.
+
+The exact boundaries this was fitted to are listed in `KNOWN-GOOD.md` in the project notes.
+
+## Install
+
+Add this URL as a third-party plugin repository in Dalamud:
+
+```
+https://raw.githubusercontent.com/dexcss/DalamudPlugins/main/repo.json
+```
+
+Then install **Housing Unlocked** from the plugin installer. Requires Dalamud API level 15.
 
 ## Commands
 
-All commands are `/hu` (you must be in rotate mode for item editing):
+All commands are `/hu`. Item editing needs Rotate mode.
 
-- `/hu` — opens the main control window
-- `/hu list` — opens the furnishing list (indoors only); sort by distance to find items in dense rooms
-- `/hu debug` — debug window: snap model internals, SphereCastRange reads, TableTop receivers
-- `/hu reset` — resets the main window position
-- `/hu autoopen` — toggles auto-open when entering housing mode
-- `/hu threshold <value>` — snap warning safety margin (default `0.07`)
-- `/hu learn` — records the active item's current floor distance as its snap-distance override (manual overrides beat everything)
-- `/hu unlearn` — removes the override
-- `/hu itemsnap` — toggles the item-to-item snap warning
-- `/hu itemsnapmode <either|sum|placed>` — which side's SphereCastRange drives the item-snap distance (default `either` = the larger of the two)
-- `/hu tablesnap` — toggles the table snap warning
+| Command | Effect |
+|---|---|
+| `/hu` | Toggle the main window |
+| `/hu autoopen` | Auto-open the window when entering housing mode |
+| `/hu threshold <v>` | Safety margin for formula-derived floor warnings (default `0.07`) |
+| `/hu itemsnap` | Toggle item-to-item warnings |
+| `/hu itemsnapmode <either\|sum\|placed>` | Which item's range drives the item snap |
+| `/hu tablesnap` | Toggle tabletop warnings |
+| `/hu wallsnap` | Toggle wall + reverse-wall warnings |
+| `/hu wallsrefresh` | Rebuild the territory wall cache |
+| `/hu log` | Start/stop a session log (see below) |
+| `/hu mark <note>` | Place a marker in the session log |
+| `/hu logpath` | Print the log folder |
+| `/hu list` | Placed furnishing list |
+| `/hu debug` | Debug window |
+| `/hu reset` | Reset the window position |
+| `/hu x y z [ry]` | Set the active item's position/rotation |
 
-You can also pass coordinates directly: `/hu x y z [ry]`.
+## Position control
 
-## How the snap model was decoded
+- **X / Y / Z** rows: type a value, or hover and use the mouse wheel (step = the Drag value).
+- Lock any axis so the wheel and gizmo cannot move it.
+- **RY** for rotation, copy/paste to move exact transforms between items.
+- **Place Anywhere** ignores the engine's placement limits; **Gizmo** adds an on-screen move
+  widget (local/world), **Snap** makes it move on the drag grid.
 
-- **Regular snap** — `min(|size.X|, |size.Z|) / 2` from the item's collision footprint (validated against in-game measurements: Grassy Rug 2.06, White Rect Partition 0.11, Company Chest 0.49, Serving Barrel 0.36).
-- **Override snap** — items carrying a `SphereCastRange` (LayerEntryType `0x4B`) block in their `.sgb` use its `Cast.X` instead. Verified against [Housingway](https://github.com/Abyeon/Housingway)'s shipped implementation and an independent extraction of all 1907 housing `.sgb` files.
-- **Wall snap** — wall-mounted items (HousingItemCategory 15) use their `TargetMarker` children: `max XZ distance × 0.5`.
-- **Table snap** — tabletop items (ItemUICategory 78) attach onto `TableTop`-flagged collision surfaces (material nibble `d4 == 8`) of nearby furniture.
+## Session logging (opt-in)
 
-Floor-Y lookup for the upward warning uses the hardcoded indoor floor heights `-7 / 0 / +7` (confirmed across all housing types).
+Logging is **off by default** — no files are written for users who never ask for them. Enable it
+with `/hu log` or **Settings → Start logging** when you want a trace for a bug report. It writes a
+JSONL session to the plugin config folder; `/hu logpath` prints the location.
+
+Wall truth lines (`POSTSNAP_FINAL`, `layout_change`, `housing_exit_snap`) only run while logging is
+on and only for wall-mounted items.
+
+## Notes and known issues
+
+- Floor, item and table snapping are stable.
+- Wall snapping is correct at the measured boundaries but has no alignment gate: an item rotated
+  nearly perpendicular to a wall can still read a snap.
+- The reverse `→ X will snap here` line is a hint, not a guarantee.
+- Outdoors behaves differently from indoors; both are supported but tested separately.
 
 ## Differences from upstream BDTH
 
-- Snap warning banners (floor / item-to-item / table) with per-item engine-accurate distances
-- `/hu learn` + `/hu unlearn` for manual per-item snap-distance overrides
+- Snap prediction card (floor / item / table / wall) with engine-derived distances
+- `/hu learn` + `/hu unlearn` for manual per-item floor-distance overrides
 - Condensed UI: icon+text Copy/Paste, no duplicate drag rows
 - Auto-open via `/hu autoopen` instead of an in-window checkbox
 - Renamed throughout (`HousingUnlocked`, `/hu`) so it can sit alongside BDTH or BDTV without conflict
@@ -59,3 +115,7 @@ Floor-Y lookup for the upward warning uses the hardcoded indoor floor heights `-
 - **[Abyeon / Housingway](https://github.com/Abyeon/Housingway)** — the SphereCastRange runtime decode and wall TargetMarker rule.
 - **The Re:MakePlace team** — material-flag tables and the SGB research that seeded the item-to-item work.
 - **Do not bother LeonBlade, his Discord, or the Housingway author with issues from this fork** — they go [here](https://github.com/dexcss/HousingUnlocked/issues).
+
+## License
+
+Same terms as the upstream BDTH plugin.

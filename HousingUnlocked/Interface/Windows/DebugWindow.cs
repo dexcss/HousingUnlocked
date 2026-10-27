@@ -13,6 +13,10 @@ namespace HousingUnlocked.Interface.Windows
 
     }
 
+    public override void PreDraw() => Theme.Push();
+
+    public override void PostDraw() => Theme.Pop();
+
     public unsafe override void Draw()
     {
       ImGui.Text($"Gamepad Mode: {PluginMemory.GamepadMode}");

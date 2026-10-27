@@ -18,14 +18,17 @@ namespace HousingUnlocked.Interface.Windows
 
     public override void PreDraw()
     {
+      Theme.Push();
       // Only allows furnishing list when the housing window is open.
       // Disallows the ability to open furnishing list outdoors.
       IsOpen &= Memory.IsHousingOpen() && !Plugin.IsOutdoors();
     }
 
+    public override void PostDraw() => Theme.Pop();
+
     private static void DrawDistance(float distance)
     {
-      ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(.5f, .5f, .5f, 1));
+      ImGui.PushStyleColor(ImGuiCol.Text, Theme.Muted);
   
       var distanceString = distance.ToString("F2");
               

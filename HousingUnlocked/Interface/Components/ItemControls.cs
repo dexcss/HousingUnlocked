@@ -20,10 +20,11 @@ namespace HousingUnlocked.Interface.Components
 
     private static float Drag => Configuration.Drag;
 
-    private static readonly Vector4 Red = new(1f, .32f, .32f, 1f);
-    private static readonly Vector4 Green = new(.35f, 1f, .45f, 1f);
-    private static readonly Vector4 Blue = new(.38f, .58f, 1f, 1f);
-    private static readonly Vector4 Gold = new(.95f, .78f, .35f, 1f);
+    // Axis colours keep their identities but are retoned to the plugin palette.
+    private static readonly Vector4 Red = Theme.AxisX;
+    private static readonly Vector4 Green = Theme.AxisY;
+    private static readonly Vector4 Blue = Theme.AxisZ;
+    private static readonly Vector4 Gold = Theme.Accent;
 
     private float? lockX;
     private float? lockY;
@@ -246,12 +247,22 @@ namespace HousingUnlocked.Interface.Components
       var hovered = ImGui.IsItemHovered();
 
       var dl = ImGui.GetWindowDrawList();
-      var bg = good ? new Vector4(.10f, .28f, .14f, .55f) : new Vector4(.36f, .10f, .10f, .60f);
       var max = p + new Vector2(width, height);
-      dl.AddRectFilled(p, max, ImGui.GetColorU32(bg), 6f * scale);
-      dl.AddRect(p, max, ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, .8f)), 6f * scale, ImDrawFlags.None, 1.5f * scale);
-      dl.AddCircleFilled(p + new Vector2(pad + 5f * scale, height / 2f), 4.5f * scale, ImGui.GetColorU32(color));
-      dl.AddText(p + new Vector2(pad + 16f * scale, pad), ImGui.GetColorU32(color), text);
+      var radius = 7f * scale;
+      // State glow, then an indigo gradient body — no stock warning red anywhere.
+      dl.AddRectFilled(p, max, ImGui.GetColorU32(good ? Theme.GoodSoft : Theme.WarnSoft), radius);
+      var topTint = good
+        ? new Vector4(.086f, .169f, .184f, .92f)
+        : new Vector4(.216f, .098f, .188f, .92f);
+      dl.AddRectFilledMultiColor(p, max, ImGui.GetColorU32(topTint), ImGui.GetColorU32(topTint),
+        ImGui.GetColorU32(Theme.Surface), ImGui.GetColorU32(Theme.Surface));
+      // State rail on the leading edge.
+      dl.AddRectFilled(new Vector2(p.X + 3f * scale, p.Y + 3f * scale),
+        new Vector2(p.X + 5f * scale, max.Y - 3f * scale), ImGui.GetColorU32(color), 2f * scale);
+      dl.AddRect(p, max, ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, .55f)),
+        radius, ImDrawFlags.None, 1.2f * scale);
+      dl.AddCircleFilled(new Vector2(p.X + pad + 5f * scale, p.Y + height / 2f), 4f * scale, ImGui.GetColorU32(color));
+      dl.AddText(new Vector2(p.X + pad + 16f * scale, p.Y + pad), ImGui.GetColorU32(color), text);
 
       if (hovered)
         DrawStatusTooltip(shownSummary: summary);
@@ -306,7 +317,7 @@ namespace HousingUnlocked.Interface.Components
       ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 34f * ImGui.GetIO().FontGlobalScale);
 
       if (warn)
-        ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(.45f, .12f, .12f, 1f));
+        ImGui.PushStyleColor(ImGuiCol.FrameBg, new Vector4(.298f, .114f, .251f, 1f));
       var changed = ImGui.InputFloat($"##hu-{label}", ref value, Drag, 0f, "%.4f");
       if (warn)
         ImGui.PopStyleColor();
