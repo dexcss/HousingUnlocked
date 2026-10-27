@@ -42,8 +42,6 @@ Wall snapping is the part that needed real measurements, so it is worth stating 
   single-face panel blocking a multi-face receiver once the item is more than `0.37` behind it.
 - Backfaces never attach.
 
-The exact boundaries this was fitted to are listed in `KNOWN-GOOD.md` in the project notes.
-
 ## Install
 
 Add this URL as a third-party plugin repository in Dalamud:
