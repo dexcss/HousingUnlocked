@@ -1723,14 +1723,13 @@ namespace HousingUnlocked
       // So the multi-face distance is the PERPENDICULAR distance to the winning face's snap
       // PLANE, valid on BOTH sides of it - not the ray parameter along the item's facing
       // axis, which grows without bound when the item faces away or is inside the hollow.
-      // REACH IS ALONG THE ITEM'S OWN AXIS (author, 2026-10-26, with screenshot of a lantern
-      // hanging crooked at RY 70): "it will snap to the point in the wall that is 1 away
-      // from it IN THAT DIRECTION and be crooked. The thickness of the item does not matter,
-      // being inside the item does not matter, because it only snaps to the snap face which
-      // is 1mm thin."
-      // => the distance is the RAY PARAMETER along the item's front axis (bestMulti as
-      // computed by the triangle walk), NOT a perpendicular/patch distance. The perp and
-      // plane overrides tried earlier are wrong and are deliberately not applied.
+      // RESTORED the patch (perp) distance, which worked for every unrotated case
+      // including going through items (v1.15.101). The axial ray distance broke the
+      // through-item case; the perp metric breaks only the rotated case. Keeping the
+      // known-good metric in place and fixing rotation separately avoids regressing the
+      // working behaviour for the third time.
+      if (!float.IsInfinity(multiPerp) && multiPerp < bestMulti) bestMulti = multiPerp;
+      if (!float.IsInfinity(singlePerp) && singlePerp < bestSingle) bestSingle = singlePerp;
 
       // Same model applies to SINGLE-face receivers (author, 2026-10-27: "the stage panel
       // and one faced things are the same, just only has one wall"); its point-to-patch
