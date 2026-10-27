@@ -1756,28 +1756,18 @@ namespace HousingUnlocked
         var bb = bestMultiBB.Value;
         var bbC = (bb.Min + bb.Max) * 0.5f;
         var bbE = (bb.Max - bb.Min) * 0.5f;
-        // v1.15.111: a multi-face receiver is a hollow box with a snap wall on EVERY face
-        // (author). Evaluate each front-facing horizontal face and keep the nearest snap
-        // point. Picking a single face from the winning triangle flipped between the +Z and
-        // -Z walls inside the hollow, and the -Z case fell back to the far X face, so RY70
-        // flickered SNAP/GOOD. At RY0 only +Z is front-facing, so 0-degree results are
-        // unchanged.
-        var snapBest = float.PositiveInfinity;
-        for (var fi = 0; fi < 4; fi++)
-        {
-          var dir = fi == 0 ? new Vector3(1, 0, 0)
-                  : fi == 1 ? new Vector3(-1, 0, 0)
-                  : fi == 2 ? new Vector3(0, 0, 1)
-                  : new Vector3(0, 0, -1);
-          if (Vector3.Dot(itemFront, dir) <= 0.05f) continue;   // backfaces never attach
-          var face = dir.X != 0f
-            ? new Vector3(bbC.X + bbE.X * dir.X, probes[0].Y, probes[0].Z)
-            : new Vector3(probes[0].X, probes[0].Y, bbC.Z + bbE.Z * dir.Z);
-          var ap = face - dir * (ITEM_DEPTH + SNAP_POINT_BIAS);
-          var d = Vector3.Distance(probes[0], ap);
-          if (d < snapBest) snapBest = d;
-        }
-        if (!float.IsInfinity(snapBest)) bestMulti = snapBest;   // REPLACE, not min
+        // v1.15.110: prefer the real snap-wall normal when the item faces it. At RY70 the item
+        // front is mostly X, so the old rule measured to the partition X face (2.77 away)
+        // and read no snap while the lantern sat 0.03 from the Z snap wall.
+        var faceRef = (multiN != Vector3.Zero && Vector3.Dot(itemFront, multiN) > 0.05f) ? multiN : itemFront;
+        var ax = MathF.Abs(faceRef.X); var ay = MathF.Abs(faceRef.Y); var az = MathF.Abs(faceRef.Z);
+        Vector3 n, faceC;
+        if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(faceRef.X == 0 ? 1 : faceRef.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, probes[0].Y, probes[0].Z); }
+        else if (ay >= az) { n = new Vector3(0, MathF.Sign(faceRef.Y == 0 ? 1 : faceRef.Y), 0); faceC = new Vector3(probes[0].X, bbC.Y + bbE.Y * n.Y, probes[0].Z); }
+        else { n = new Vector3(0, 0, MathF.Sign(faceRef.Z == 0 ? 1 : faceRef.Z)); faceC = new Vector3(probes[0].X, probes[0].Y, bbC.Z + bbE.Z * n.Z); }
+        var attachPt = faceC - n * (ITEM_DEPTH + SNAP_POINT_BIAS);
+        var snapD = Vector3.Distance(probes[0], attachPt);
+        bestMulti = snapD;   // REPLACE, not min: the nearest-face distance must not survive
       }
       if (bestSingleBB.HasValue && !float.IsInfinity(bestSingle))
       {
