@@ -1639,7 +1639,7 @@ namespace HousingUnlocked
               bestMulti = itemBest; bestMultiName = itemName; bestMultiBB = itemBB;
               winN = rGeomN; winP = rGeomP; winT = rGeomT; winSide = rGeomSide;
               winSigned = rGeomSigned; winPerp = rGeomPerp; winIsTerr = false; winName = itemName;
-              multiN = rGeomN; multiP = rGeomP; multiPerp = hadWallTris ? rGeomPerp : itemBest;
+              multiN = hadWallTris ? rGeomN : Vector3.Zero; multiP = rGeomP; multiPerp = hadWallTris ? rGeomPerp : itemBest;
               multiPos = new Vector3(go->Position.X, go->Position.Y, go->Position.Z);
             }
           }
@@ -1650,7 +1650,7 @@ namespace HousingUnlocked
             bestSingleBB = itemBB;
             winN = rGeomN; winP = rGeomP; winT = rGeomT; winSide = rGeomSide;
             winSigned = rGeomSigned; winPerp = rGeomPerp; winIsTerr = false; winName = itemName;
-            singleN = rGeomN; singleP = rGeomP; singlePerp = hadWallTris ? rGeomPerp : itemBest;
+            singleN = hadWallTris ? rGeomN : Vector3.Zero; singleP = rGeomP; singlePerp = hadWallTris ? rGeomPerp : itemBest;
             singlePos = new Vector3(go->Position.X, go->Position.Y, go->Position.Z);
           }
         }
@@ -1756,11 +1756,15 @@ namespace HousingUnlocked
         var bb = bestMultiBB.Value;
         var bbC = (bb.Min + bb.Max) * 0.5f;
         var bbE = (bb.Max - bb.Min) * 0.5f;
-        var ax = MathF.Abs(itemFront.X); var ay = MathF.Abs(itemFront.Y); var az = MathF.Abs(itemFront.Z);
+        // v1.15.110: prefer the real snap-wall normal when the item faces it. At RY70 the item
+        // front is mostly X, so the old rule measured to the partition X face (2.77 away)
+        // and read no snap while the lantern sat 0.03 from the Z snap wall.
+        var faceRef = (multiN != Vector3.Zero && Vector3.Dot(itemFront, multiN) > 0.05f) ? multiN : itemFront;
+        var ax = MathF.Abs(faceRef.X); var ay = MathF.Abs(faceRef.Y); var az = MathF.Abs(faceRef.Z);
         Vector3 n, faceC;
-        if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, probes[0].Y, probes[0].Z); }
-        else if (ay >= az) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(probes[0].X, bbC.Y + bbE.Y * n.Y, probes[0].Z); }
-        else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(probes[0].X, probes[0].Y, bbC.Z + bbE.Z * n.Z); }
+        if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(faceRef.X == 0 ? 1 : faceRef.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, probes[0].Y, probes[0].Z); }
+        else if (ay >= az) { n = new Vector3(0, MathF.Sign(faceRef.Y == 0 ? 1 : faceRef.Y), 0); faceC = new Vector3(probes[0].X, bbC.Y + bbE.Y * n.Y, probes[0].Z); }
+        else { n = new Vector3(0, 0, MathF.Sign(faceRef.Z == 0 ? 1 : faceRef.Z)); faceC = new Vector3(probes[0].X, probes[0].Y, bbC.Z + bbE.Z * n.Z); }
         var attachPt = faceC - n * (ITEM_DEPTH + SNAP_POINT_BIAS);
         var snapD = Vector3.Distance(probes[0], attachPt);
         bestMulti = snapD;   // REPLACE, not min: the nearest-face distance must not survive
@@ -1770,11 +1774,15 @@ namespace HousingUnlocked
         var bb = bestSingleBB.Value;
         var bbC = (bb.Min + bb.Max) * 0.5f;
         var bbE = (bb.Max - bb.Min) * 0.5f;
-        var ax = MathF.Abs(itemFront.X); var ay = MathF.Abs(itemFront.Y); var az = MathF.Abs(itemFront.Z);
+        // v1.15.110: prefer the real snap-wall normal when the item faces it. At RY70 the item
+        // front is mostly X, so the old rule measured to the partition X face (2.77 away)
+        // and read no snap while the lantern sat 0.03 from the Z snap wall.
+        var faceRef = (singleN != Vector3.Zero && Vector3.Dot(itemFront, singleN) > 0.05f) ? singleN : itemFront;
+        var ax = MathF.Abs(faceRef.X); var ay = MathF.Abs(faceRef.Y); var az = MathF.Abs(faceRef.Z);
         Vector3 n, faceC;
-        if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, probes[0].Y, probes[0].Z); }
-        else if (ay >= az) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(probes[0].X, bbC.Y + bbE.Y * n.Y, probes[0].Z); }
-        else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(probes[0].X, probes[0].Y, bbC.Z + bbE.Z * n.Z); }
+        if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(faceRef.X == 0 ? 1 : faceRef.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, probes[0].Y, probes[0].Z); }
+        else if (ay >= az) { n = new Vector3(0, MathF.Sign(faceRef.Y == 0 ? 1 : faceRef.Y), 0); faceC = new Vector3(probes[0].X, bbC.Y + bbE.Y * n.Y, probes[0].Z); }
+        else { n = new Vector3(0, 0, MathF.Sign(faceRef.Z == 0 ? 1 : faceRef.Z)); faceC = new Vector3(probes[0].X, probes[0].Y, bbC.Z + bbE.Z * n.Z); }
         var attachS = faceC - n * (ITEM_DEPTH + SNAP_POINT_BIAS);
         bestSingle = Vector3.Distance(probes[0], attachS);
       }
