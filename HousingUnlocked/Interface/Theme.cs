@@ -11,8 +11,9 @@ namespace HousingUnlocked.Interface
   /// </summary>
   public static class Theme
   {
-    // Base surfaces
-    public static readonly Vector4 WindowBg   = new(0.071f, 0.063f, 0.118f, 0.97f);
+    // Base surfaces — the window body is nearly black so the panel reads as a dark glass
+    // sheet; the raised surfaces keep the indigo tint.
+    public static readonly Vector4 WindowBg   = new(0.024f, 0.020f, 0.035f, 0.96f);
     public static readonly Vector4 Surface    = new(0.110f, 0.098f, 0.173f, 1.00f);
     public static readonly Vector4 SurfaceAlt = new(0.153f, 0.137f, 0.235f, 1.00f);
     public static readonly Vector4 Border     = new(0.310f, 0.255f, 0.545f, 0.55f);
@@ -39,7 +40,7 @@ namespace HousingUnlocked.Interface
     private static readonly (ImGuiCol Col, Vector4 Value)[] Styles =
     {
       (ImGuiCol.WindowBg,                WindowBg),
-      (ImGuiCol.ChildBg,                 new Vector4(0.086f, 0.075f, 0.137f, 0.55f)),
+      (ImGuiCol.ChildBg,                 new Vector4(0.016f, 0.014f, 0.026f, 0.55f)),
       (ImGuiCol.PopupBg,                 Surface),
       (ImGuiCol.Border,                  Border),
       (ImGuiCol.BorderShadow,            new Vector4(0, 0, 0, 0)),
