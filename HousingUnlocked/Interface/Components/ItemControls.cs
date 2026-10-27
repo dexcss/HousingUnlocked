@@ -42,6 +42,9 @@ namespace HousingUnlocked.Interface.Components
 
     public unsafe void Draw()
     {
+      if (Memory.HousingStructure == null)
+        return;
+
       if (Memory.HousingStructure->ActiveItem != null)
       {
         Memory.Position = Memory.ReadPosition();

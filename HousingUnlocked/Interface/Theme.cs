@@ -35,7 +35,6 @@ namespace HousingUnlocked.Interface
     public static readonly Vector4 AxisY      = new(0.412f, 0.886f, 0.867f, 1.00f);
     public static readonly Vector4 AxisZ      = new(0.639f, 0.549f, 0.980f, 1.00f);
 
-    public static uint U32(Vector4 c) => ImGui.GetColorU32(c);
 
     private static readonly (ImGuiCol Col, Vector4 Value)[] Styles =
     {

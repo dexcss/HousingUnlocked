@@ -38,6 +38,19 @@ namespace HousingUnlocked
 
     public unsafe LayoutWorld* Layout => (LayoutWorld*)_layoutWorldPtr;
     public unsafe HousingStructure* HousingStructure => Layout->HousingStruct;
+
+    /// <summary>
+    /// When false, the long per-frame diagnostic strings are replaced by a short
+    /// placeholder. They are only consumed by the debug window and the session log, and
+    /// building them costs several string allocations every frame.
+    /// </summary>
+    public static bool VerboseDiagnostics { get; set; } = true;
+
+    private const string DiagOff = "diagnostics off (debug window / /hu log)";
+
+    // Skip housing objects further than this from the item being tested. The largest
+    // authored item-to-item / wall range is ~2.7, so 8 is a safe cheap early-out.
+    private const float NearbyObjectCullRadius = 8f;
     public unsafe HousingModule* HousingModule => _housingModulePtr != IntPtr.Zero ? (HousingModule*)Marshal.ReadIntPtr(_housingModulePtr) : null;
     public static unsafe Camera* Camera => &CameraManager.Instance()->GetActiveCamera()->CameraBase.SceneCamera;
 
@@ -239,7 +252,6 @@ namespace HousingUnlocked
     //   multi-face-first  -> predicted White Rect, engine attached Stage Panel (nd=0)
     //   nearest-first     -> predicted Stage Panel, engine attached White Rect
     // so the previous winner is retained unless the alternative is >=10 cm closer.
-    private string _lastWallFurnName = "";
 
     // ==== Reverse wall re-attachment: placed wall items that will snap to the
     // item currently being held (the active item acting as a wall receiver) ====
@@ -867,15 +879,16 @@ namespace HousingUnlocked
       // missing card can be explained by the numbers rather than inferred.
       var cands = new List<string>(4);
 
+      var mgrCache1 = HousingModule->GetCurrentManager();
       for (var i = 0; i < 600; i++)
       {
-        var addr = HousingModule->GetCurrentManager()->Objects[i];
+        var addr = mgrCache1->Objects[i];
         if (addr == 0) continue;
         var go = (GameObject*)addr;
         if (go->SharedGroupLayoutInstance == active) continue; // skip the dragged item itself
 
         var dist = Vector3.Distance(activePos, go->Position);
-        if (dist > 8f) continue; // max known range 2.7 (+sum mode) — cheap early-out
+        if (dist > NearbyObjectCullRadius) continue; // max known range 2.7 (+sum mode) — cheap early-out
 
         scanned++;
 
@@ -939,10 +952,13 @@ namespace HousingUnlocked
       var obCtx = default(OrientedBounds);
       active->GetOrientedBoundsImpl(&obCtx);
       var ctxFront = Vector3.Transform(Vector3.UnitZ, active->Transform.Rotation);
-      ItemSnapDiagnostic = $"scanned {scanned} nearby ({withRange} snap-capable), active range {activeRange:0.####} [{ActiveItemSphereCastSource}], mode {mode} || " +
+      if (VerboseDiagnostics)
+        ItemSnapDiagnostic = $"scanned {scanned} nearby ({withRange} snap-capable), active range {activeRange:0.####} [{ActiveItemSphereCastSource}], mode {mode} || " +
         $"ctx=id:{activeItemId} cat:{_cachedActiveItemCategory} model:{_cachedActiveItemModelKey} out:{(_cachedActiveItemIsOutdoor ? 1 : 0)} " +
         $"p=({activePos.X:0.###},{activePos.Y:0.###},{activePos.Z:0.###}) front=({ctxFront.X:0.##},{ctxFront.Y:0.##},{ctxFront.Z:0.##}) " +
         $"half=({obCtx.HalfExtents.X:0.###},{obCtx.HalfExtents.Y:0.###},{obCtx.HalfExtents.Z:0.###}) cands=[{string.Join(";", cands)}]";
+      else
+        ItemSnapDiagnostic = DiagOff;
 
       if (bestId != 0)
       {
@@ -1171,8 +1187,11 @@ namespace HousingUnlocked
         }
       }
 
-      TableSnapDiagnostic = $"{candidates.Count} TableTop receiver(s), item Y [{bbMin.Y:0.###}..{bbMax.Y:0.###}] " +
+      if (VerboseDiagnostics)
+        TableSnapDiagnostic = $"{candidates.Count} TableTop receiver(s), item Y [{bbMin.Y:0.###}..{bbMax.Y:0.###}] " +
         $"XZ {bbMax.X - bbMin.X:0.###}x{bbMax.Z - bbMin.Z:0.###}, gap {(float.IsInfinity(nearestGap) ? float.NaN : nearestGap):0.###}, reach {reach:0.###} ({reachSrc}){(sourceNote.Length > 0 ? ", " + sourceNote : "")}";
+      else
+        TableSnapDiagnostic = DiagOff;
 
       if (best != float.PositiveInfinity)
       {
@@ -1203,9 +1222,10 @@ namespace HousingUnlocked
       var active = HousingStructure->ActiveItem;
       var activePos = active->Transform.Translation;
 
+      var mgrCache2 = HousingModule->GetCurrentManager();
       for (var i = 0; i < 600; i++)
       {
-        var addr = HousingModule->GetCurrentManager()->Objects[i];
+        var addr = mgrCache2->Objects[i];
         if (addr == 0) continue;
         var go = (GameObject*)addr;
         if (go->SharedGroupLayoutInstance == active) continue;
@@ -1480,7 +1500,6 @@ namespace HousingUnlocked
       int wallTris = 0;
       var usedAabbFallback = false;
       AABB? bestFurnBB = null;
-      var bestFurnBBName = "";
       // Per-class bests: multi-face receivers outrank single-face false walls
       // (measured: lantern between a Stage Panel and a White Rect snaps to the
       // White Rect), which outrank house walls (handled via terrHit below).
@@ -1523,14 +1542,15 @@ namespace HousingUnlocked
       uint nearId = 0;
       var nearDist = float.MaxValue;
 
+      var mgrCache3 = HousingModule->GetCurrentManager();
       for (var i = 0; i < 600; i++)
       {
-        var addr = HousingModule->GetCurrentManager()->Objects[i];
+        var addr = mgrCache3->Objects[i];
         if (addr == 0) continue;
         var go = (GameObject*)addr;
         if (go->SharedGroupLayoutInstance == active) continue;
         var dNear = Vector3.Distance(pos, go->Position);
-        if (dNear > 8f) continue;
+        if (dNear > NearbyObjectCullRadius) continue;
         if (dNear < nearDist) { nearDist = dNear; nearId = go->BaseId; }
 
         var rowId = go->BaseId;
@@ -1754,13 +1774,10 @@ namespace HousingUnlocked
         var bb = bestMultiBB.Value;
         var bbC = (bb.Min + bb.Max) * 0.5f;
         var bbE = (bb.Max - bb.Min) * 0.5f;
-        // v1.15.110: prefer the real snap-wall normal when the item faces it. At RY70 the item
-        // front is mostly X, so the old rule measured to the partition X face (2.77 away)
-        // and read no snap while the lantern sat 0.03 from the Z snap wall.
-        // v1.15.113: take the AXIS from the winning snap wall (the wall the item is against)
-        // and the SIDE from the item front. Falling back to the item's dominant front axis at
-        // RY70 measured the partition X face, so a backward slide read GOOD long before the
-        // snap point. At RY0 winner and front are both +Z, so 0-degree results are unchanged.
+        // Face selection (v1.15.113, re-confirmed v1.15.114): the AXIS comes from the winning
+        // snap-wall normal (the wall the item is against) and the SIDE from the item front.
+        // Do NOT pick the face from the item's dominant front component: at RY70 that is X,
+        // which measured the partition's X face 2.77 away while the lantern sat on the Z wall.
         var faceRef = (multiN != Vector3.Zero) ? multiN : itemFront;
         var ax = MathF.Abs(faceRef.X); var ay = MathF.Abs(faceRef.Y); var az = MathF.Abs(faceRef.Z);
         var fx = MathF.Abs(itemFront.X); var fy = MathF.Abs(itemFront.Y); var fz = MathF.Abs(itemFront.Z);
@@ -1787,13 +1804,10 @@ namespace HousingUnlocked
         var bb = bestSingleBB.Value;
         var bbC = (bb.Min + bb.Max) * 0.5f;
         var bbE = (bb.Max - bb.Min) * 0.5f;
-        // v1.15.110: prefer the real snap-wall normal when the item faces it. At RY70 the item
-        // front is mostly X, so the old rule measured to the partition X face (2.77 away)
-        // and read no snap while the lantern sat 0.03 from the Z snap wall.
-        // v1.15.113: take the AXIS from the winning snap wall (the wall the item is against)
-        // and the SIDE from the item front. Falling back to the item's dominant front axis at
-        // RY70 measured the partition X face, so a backward slide read GOOD long before the
-        // snap point. At RY0 winner and front are both +Z, so 0-degree results are unchanged.
+        // Face selection (v1.15.113, re-confirmed v1.15.114): the AXIS comes from the winning
+        // snap-wall normal (the wall the item is against) and the SIDE from the item front.
+        // Do NOT pick the face from the item's dominant front component: at RY70 that is X,
+        // which measured the partition's X face 2.77 away while the lantern sat on the Z wall.
         var faceRef = (singleN != Vector3.Zero) ? singleN : itemFront;
         var ax = MathF.Abs(faceRef.X); var ay = MathF.Abs(faceRef.Y); var az = MathF.Abs(faceRef.Z);
         var fx = MathF.Abs(itemFront.X); var fy = MathF.Abs(itemFront.Y); var fz = MathF.Abs(itemFront.Z);
@@ -1921,14 +1935,21 @@ namespace HousingUnlocked
       // at exactly the capture distance.
       var furnHit = bestFurn < limit;
       var terrHit = bestTerr < territoryLimit;
-      var geomDiag = $"front=({itemFront.X:0.###},{itemFront.Y:0.###},{itemFront.Z:0.###}) " +
+      if (VerboseDiagnostics)
+      {
+        var geomDiag = $"front=({itemFront.X:0.###},{itemFront.Y:0.###},{itemFront.Z:0.###}) " +
                      $"recv=[{string.Join(";", recvLog)}] " +
                      $"win={(winName.Length > 0 ? winName : "-")}{(winIsTerr ? "(terr)" : "")} " +
                      $"winN=({winN.X:0.###},{winN.Y:0.###},{winN.Z:0.###}) " +
                      $"winP=({winP.X:0.###},{winP.Y:0.###},{winP.Z:0.###}) " +
                      $"winT={winT:0.###} winSide={winSide} winSD={winSigned:0.###} winPerp={winPerp:0.###} " +
                      $"occDepth={occDepth:0.###} occPanelHalf={occPanelHalf:0.###} occBlocked={(occludedBySingle ? 1 : 0)}";
-      WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), nearObject id={nearId} d={(float.IsInfinity(nearDist) ? "-" : nearDist.ToString("0.###"))}, capture {capture:0.###} ({probes.Count} probes); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag} || {geomDiag}";
+        WallSnapDiagnostic = $"back-ray check ({wallTris} wall tris{(usedAabbFallback ? ", aabb fallback" : "")}), nearObject id={nearId} d={(float.IsInfinity(nearDist) ? "-" : nearDist.ToString("0.###"))}, capture {capture:0.###} ({probes.Count} probes); furniture {(float.IsInfinity(bestFurn) ? "-" : bestFurn.ToString("0.###"))} (hit {(furnHit ? 1 : 0)}){(furnClass.Length > 0 ? ", " + furnClass : "")}{(bestFurnBB.HasValue ? $" bb=[{bestFurnBB.Value.Min.X:0.##},{bestFurnBB.Value.Min.Y:0.##},{bestFurnBB.Value.Min.Z:0.##}]-[{bestFurnBB.Value.Max.X:0.##},{bestFurnBB.Value.Max.Y:0.##},{bestFurnBB.Value.Max.Z:0.##}]" : "")}, territory {(float.IsInfinity(bestTerr) ? "-" : bestTerr.ToString("0.###"))} (hit {(terrHit ? 1 : 0)}){terrDiag} || {geomDiag}";
+      }
+      else
+      {
+        WallSnapDiagnostic = DiagOff;
+      }
 
       if (furnHit || terrHit)
       {
@@ -2075,9 +2096,10 @@ namespace HousingUnlocked
       var nearTriTris = 0;
 
       var targets = new List<(string Name, float Gap)>();
+      var mgrCache4 = HousingModule->GetCurrentManager();
       for (var i = 0; i < 600; i++)
       {
-        var addr = HousingModule->GetCurrentManager()->Objects[i];
+        var addr = mgrCache4->Objects[i];
         if (addr == 0) continue;
         var go = (GameObject*)addr;
         if (go->SharedGroupLayoutInstance == active) continue;
@@ -2296,6 +2318,15 @@ namespace HousingUnlocked
     /// Returns the winning receiver's group pointer (0 for a territory wall) so a caller
     /// can ask "is the nearest receiver the item I am holding?".
     ///
+    /// <para>
+    /// METRIC NOTE: this deliberately measures point-to-triangle EUCLIDEAN distance, not the
+    /// forward card's axial capture (perpendicular gap / |front . normal|). The question here
+    /// is "what is this item attached to", which needs a non-negative, directly comparable
+    /// distance between receivers; the card's question is "will it snap", which is measured
+    /// along the item's own axis. Do not unify the two without re-measuring - the truth lines
+    /// (nearest=, nd=, MATCH=) depend on this metric.
+    /// </para>
+    ///
     /// This exists for the reverse check. A placed wall item only MOVES onto the held
     /// receiver if that receiver is the closest wall surface to it; otherwise it stays
     /// where it already is. Measured 2026-10-26: the Wall Lantern sat at wallD=0.000 on a
@@ -2338,15 +2369,16 @@ namespace HousingUnlocked
       string bestMultiName = "", bestSingleName = "";
       nint bestMultiGroup = 0, bestSingleGroup = 0;
 
+      var mgrCache5 = HousingModule->GetCurrentManager();
       for (var i = 0; i < 600; i++)
       {
-        var addr = HousingModule->GetCurrentManager()->Objects[i];
+        var addr = mgrCache5->Objects[i];
         if (addr == 0) continue;
         var go = (GameObject*)addr;
         var gp = go->SharedGroupLayoutInstance;
         if (gp == null) continue;
         if ((nint)gp == skipGroupA || (nint)gp == skipGroupB) continue;
-        if (Vector3.Distance(probe, go->Position) > 8f) continue;
+        if (Vector3.Distance(probe, go->Position) > NearbyObjectCullRadius) continue;
 
         var rowId = go->BaseId;
         if (!_furnitureRowCache.TryGetValue(rowId, out var cached))
@@ -2608,10 +2640,6 @@ namespace HousingUnlocked
 
     /// <summary>Möller–Trumbore ray/triangle intersection (no back-face culling).</summary>
     /// <summary>True when the point lies inside the AABB (with a small tolerance).</summary>
-    private static bool ContainsPoint(AABB bb, Vector3 p, float eps = 0.001f)
-      => p.X >= bb.Min.X - eps && p.X <= bb.Max.X + eps &&
-         p.Y >= bb.Min.Y - eps && p.Y <= bb.Max.Y + eps &&
-         p.Z >= bb.Min.Z - eps && p.Z <= bb.Max.Z + eps;
     private static bool RayTriangleHit(Vector3 origin, Vector3 dir, Vector3 a, Vector3 b, Vector3 c, out float t)
     {
       t = 0f;
@@ -2836,9 +2864,10 @@ namespace HousingUnlocked
         return 0;
       }
 
+      var mgrCache6 = HousingModule->GetCurrentManager();
       for (var i = 0; i < 600; i++)
       {
-        var addr = HousingModule->GetCurrentManager()->Objects[i];
+        var addr = mgrCache6->Objects[i];
         if (addr == 0) continue;
 
         var go = (GameObject*)addr;
@@ -3032,7 +3061,7 @@ namespace HousingUnlocked
                       exitTruth = $" nearest=\"{enn}\"{(eterr ? "(terr)" : "")} nd={end:0.###} attached={(end <= 0.12f ? 1 : 0)}";
                     }
                   }
-                  catch { }
+                  catch (Exception ex) { Plugin.Log.Verbose(ex, "housing_exit_snap truth scan failed"); }
                   // `before` is where the item was PLACED (snapshot refreshed on deselect),
                   // so this delta is the deferred snap. Beyond the 1.0 capture it cannot be
                   // a snap - it is the layout restoring a drag (label it, do not calibrate on it).
@@ -3145,7 +3174,7 @@ namespace HousingUnlocked
                                   $"(NOT the verdict - snaps apply on housing exit)";
                     }
                   }
-                  catch { }
+                  catch (Exception ex) { Plugin.Log.Verbose(ex, "POSTSNAP_FINAL truth scan failed"); }
                   // v1.15.116: snapshot the PLACED position. The next housing_exit_snap
                   // then measures only the engine's deferred snap, not the revert of a drag.
                   _lastLayoutSnapshot[_pendingPostSnapGroup] = p;
@@ -3219,7 +3248,7 @@ namespace HousingUnlocked
                                   $" cands=[{string.Join(";", lcCands)}]";
                       }
                     }
-                    catch { }
+                    catch (Exception ex) { Plugin.Log.Verbose(ex, "layout_change truth scan failed"); }
                     SnapLogger.Event("layout_change",
                       $"baseId={go->BaseId} before=[{prev.X:0.####},{prev.Y:0.####},{prev.Z:0.####}] after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}]{lcTruth}");
                   }

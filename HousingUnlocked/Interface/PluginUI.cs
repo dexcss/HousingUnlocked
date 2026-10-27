@@ -37,6 +37,9 @@ namespace HousingUnlocked.Interface
           SnapLogger.Stop("main window closed");
       }
 
+      // Only build the long wallDiag / itemDiag strings while something reads them.
+      PluginMemory.VerboseDiagnostics = Debug.IsOpen || SnapLogger.Enabled;
+
       Gizmo.Draw();
       Windows.Draw();
     }

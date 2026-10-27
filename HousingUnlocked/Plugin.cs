@@ -79,11 +79,6 @@ namespace HousingUnlocked
       return _memory;
     }
 
-    public static PluginUI GetUi()
-    {
-      return _ui;
-    }
-
     private void Framework_Update(IFramework framework)
     {
       _memory.Update();

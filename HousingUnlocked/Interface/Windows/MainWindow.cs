@@ -54,7 +54,9 @@ namespace HousingUnlocked.Interface.Windows
       DrawDragStep();
       ImGui.Separator();
 
-      if (Memory.HousingStructure->Mode == HousingLayoutMode.None)
+      if (Memory.HousingStructure == null)
+        DrawHint("Enter housing mode to get started.");
+      else if (Memory.HousingStructure->Mode == HousingLayoutMode.None)
         DrawHint("Enter housing mode to get started.");
       else if (PluginMemory.GamepadMode)
         DrawHint("Gamepad mode is not supported.");

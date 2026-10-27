@@ -6,6 +6,7 @@ namespace HousingUnlocked
   [Serializable]
   public class Configuration : IPluginConfiguration
   {
+    // Required by IPluginConfiguration (Dalamud's config versioning hook).
     public int Version { get; set; } = 0;
     public bool UseGizmo { get; set; } = false;
     public bool DoSnap { get; set; } = false;
