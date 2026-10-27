@@ -1740,6 +1740,11 @@ namespace HousingUnlocked
       if (!float.IsInfinity(singlePerp) && singlePerp < bestSingle) bestSingle = singlePerp;
 
       // Replace with distance to the snap point on the faced side, when we have the receiver AABB.
+      // v1.15.108: the snap point must keep the ITEM's lateral position, not the AABB centre.
+      // The Blank Riviera Partition AABB is 4.0 x 6.5, so an AABB-centre snap point sits at the
+      // panel mid-height/mid-width; a lantern exactly on the snap wall measured 1.746 and the
+      // card said "no snap". Projecting the pivot onto the faced plane cancels X/Y and leaves
+      // only the axial delta: 0.3683 -> 0.002, 1.3787 -> 1.009, -0.6417 -> 1.012.
       const float ITEM_DEPTH = 0.13f;   // lantern depth (face 0.503 - attach 0.3683)
       if (bestMultiBB.HasValue && !float.IsInfinity(bestMulti))
       {
@@ -1748,9 +1753,9 @@ namespace HousingUnlocked
         var bbE = (bb.Max - bb.Min) * 0.5f;
         var ax = MathF.Abs(itemFront.X); var ay = MathF.Abs(itemFront.Y); var az = MathF.Abs(itemFront.Z);
         Vector3 n, faceC;
-        if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, bbC.Y, bbC.Z); }
-        else if (ay >= az) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(bbC.X, bbC.Y + bbE.Y * n.Y, bbC.Z); }
-        else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(bbC.X, bbC.Y, bbC.Z + bbE.Z * n.Z); }
+        if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, probes[0].Y, probes[0].Z); }
+        else if (ay >= az) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(probes[0].X, bbC.Y + bbE.Y * n.Y, probes[0].Z); }
+        else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(probes[0].X, probes[0].Y, bbC.Z + bbE.Z * n.Z); }
         var attachPt = faceC - n * ITEM_DEPTH;
         var snapD = Vector3.Distance(probes[0], attachPt);
         bestMulti = snapD;   // REPLACE, not min: the nearest-face distance must not survive
@@ -1762,9 +1767,9 @@ namespace HousingUnlocked
         var bbE = (bb.Max - bb.Min) * 0.5f;
         var ax = MathF.Abs(itemFront.X); var ay = MathF.Abs(itemFront.Y); var az = MathF.Abs(itemFront.Z);
         Vector3 n, faceC;
-        if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, bbC.Y, bbC.Z); }
-        else if (ay >= az) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(bbC.X, bbC.Y + bbE.Y * n.Y, bbC.Z); }
-        else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(bbC.X, bbC.Y, bbC.Z + bbE.Z * n.Z); }
+        if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, probes[0].Y, probes[0].Z); }
+        else if (ay >= az) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(probes[0].X, bbC.Y + bbE.Y * n.Y, probes[0].Z); }
+        else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(probes[0].X, probes[0].Y, bbC.Z + bbE.Z * n.Z); }
         var attachS = faceC - n * ITEM_DEPTH;
         bestSingle = Vector3.Distance(probes[0], attachS);
       }
