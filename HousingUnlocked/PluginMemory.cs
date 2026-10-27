@@ -1639,7 +1639,7 @@ namespace HousingUnlocked
               bestMulti = itemBest; bestMultiName = itemName; bestMultiBB = itemBB;
               winN = rGeomN; winP = rGeomP; winT = rGeomT; winSide = rGeomSide;
               winSigned = rGeomSigned; winPerp = rGeomPerp; winIsTerr = false; winName = itemName;
-              multiN = rGeomN; multiP = rGeomP; multiPerp = rGeomPerp;
+              multiN = rGeomN; multiP = rGeomP; multiPerp = hadWallTris ? rGeomPerp : itemBest;
               multiPos = new Vector3(go->Position.X, go->Position.Y, go->Position.Z);
             }
           }
@@ -1650,7 +1650,7 @@ namespace HousingUnlocked
             bestSingleBB = itemBB;
             winN = rGeomN; winP = rGeomP; winT = rGeomT; winSide = rGeomSide;
             winSigned = rGeomSigned; winPerp = rGeomPerp; winIsTerr = false; winName = itemName;
-            singleN = rGeomN; singleP = rGeomP; singlePerp = rGeomPerp;
+            singleN = rGeomN; singleP = rGeomP; singlePerp = hadWallTris ? rGeomPerp : itemBest;
             singlePos = new Vector3(go->Position.X, go->Position.Y, go->Position.Z);
           }
         }
@@ -1714,6 +1714,27 @@ namespace HousingUnlocked
           panelSide = Vector3.Dot(singleN, probes[0] - singleP);
         occludedBySingle = panelSide < -BEHIND_DEPTH;
       }
+
+      // HOLLOW MULTI-FACE MODEL (author, 2026-10-27):
+      //   "you can think of each multi directional as HOLLOW, each wall on the partition
+      //    surrounding it has a snap wall ~0.001 thick. If you move 1 away from that it
+      //    wont snap in either direction as long as it would attach to that snap wall and
+      //    its direction is lined up with it."
+      // So the multi-face distance is the PERPENDICULAR distance to the winning face's snap
+      // PLANE, valid on BOTH sides of it - not the ray parameter along the item's facing
+      // axis, which grows without bound when the item faces away or is inside the hollow.
+      // FINITE PATCH distance (v1.15.97). The snap wall is a bounded quad, not an infinite
+      // plane. Using the plane distance ignored lateral offset, so a lantern rotated 70 deg
+      // read as "0.3 from the plane" from yalms away along the wall and claimed snaps from
+      // across the room (author report, 2026-10-27). Use the true point-to-patch distance,
+      // which is what the triangle walk already computes; it is only stale when the winning
+      // distance came from the AABB fallback, which the merge now corrects.
+      if (!float.IsInfinity(multiPerp) && multiPerp < bestMulti) bestMulti = multiPerp;
+      if (!float.IsInfinity(singlePerp) && singlePerp < bestSingle) bestSingle = singlePerp;
+
+      // Same model applies to SINGLE-face receivers (author, 2026-10-27: "the stage panel
+      // and one faced things are the same, just only has one wall"); its point-to-patch
+      // distance is applied above via singlePerp.
 
       if (occludedBySingle)
       {
@@ -1801,14 +1822,21 @@ namespace HousingUnlocked
       //   plugin surface distance D at that flip = 0.499  =>  surface->attach = 0.500
       // Applied to single-face receivers only, to avoid moving the multi-face thresholds
       // that are already confirmed working.
+      // REMOVED (v1.15.96): the wallOffset add-back from 1.15.92 is no longer valid.
+      // It existed because the distance was measured to the receiver's wall SURFACE while
+      // the engine measures from the ATTACH point. The hollow-model change (1.15.93/94)
+      // now measures the perpendicular distance to the snap PLANE itself, which IS the
+      // engine's reference - so adding the offset double-counts. Observed at lantern
+      // Z=-9.0131: White Rect at 0.773 (inside capture) + 0.5 = 1.273 -> wrongly "no snap".
       var wallOffset = 0f;
       if (_cachedActiveItemId != 0)
         SnapRangeData.TryGetWallThreshold(_cachedActiveItemId, out wallOffset);
-      if (wallOffset > 0f && !float.IsInfinity(bestFurn) && furnClass == "single-face")
-        bestFurn += wallOffset;
 
-      var furnHit = bestFurn <= limit;
-      var terrHit = bestTerr <= territoryLimit;
+      // STRICT comparison: the engine snaps at 0.99 but NOT at exactly 1.0 (author,
+      // 2026-10-27). Using <= accepted the boundary itself and produced a false positive
+      // at exactly the capture distance.
+      var furnHit = bestFurn < limit;
+      var terrHit = bestTerr < territoryLimit;
       var geomDiag = $"front=({itemFront.X:0.###},{itemFront.Y:0.###},{itemFront.Z:0.###}) " +
                      $"recv=[{string.Join(";", recvLog)}] " +
                      $"win={(winName.Length > 0 ? winName : "-")}{(winIsTerr ? "(terr)" : "")} " +
