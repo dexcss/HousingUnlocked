@@ -2962,10 +2962,7 @@ namespace HousingUnlocked
     /// For these the one-sided front/back filter must not apply; only the item's
     /// back-ray direction decides.
     /// </summary>
-    /// 21106 = Blank Riviera Partition, added 2026-10-27 on the author's correction: it IS
-    /// a multi-face receiver, but was being classified single-face (logged as
-    /// "...Blank Riviera Partition#21106:S"), sending it down the wrong geometry path.
-    public static readonly HashSet<uint> MultiSidedWallReceiverItemIds = [33267u, 35576u, 24514u, 30422u, 30423u, 30410u, 21106u];
+    public static readonly HashSet<uint> MultiSidedWallReceiverItemIds = [33267u, 35576u, 24514u, 30422u, 30423u, 30410u];
 
     /// <summary>True when the receiver accepts wall items from more than one face.</summary>
     public static bool IsMultiSidedWallReceiver(uint itemId) => MultiSidedWallReceiverItemIds.Contains(itemId);
