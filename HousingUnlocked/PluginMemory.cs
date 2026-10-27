@@ -1745,12 +1745,10 @@ namespace HousingUnlocked
       // panel mid-height/mid-width; a lantern exactly on the snap wall measured 1.746 and the
       // card said "no snap". Projecting the pivot onto the faced plane cancels X/Y and leaves
       // only the axial delta: 0.3683 -> 0.002, 1.3787 -> 1.009, -0.6417 -> 1.012.
-      const float ITEM_DEPTH = 0.13f;   // lantern depth (face 0.503 - attach 0.3683)
-      // v1.15.109: measured asymmetry (author, 2026-10-27). Exactly +1.0 forward does NOT
-      // snap, exactly -1.0 backwards through the wall DOES. Same 0.01 on both sides: the snap
-      // point sits this much further from the faced face than ITEM_DEPTH alone, which shrinks
-      // the forward reach and grows the backward reach. 0.01 is the measured step.
-      const float SNAP_POINT_BIAS = 0.01f;
+      // Snap wall sits this far inside the receiver AABB face (author coordinates, 2026-10-27:
+      // AABB +Z face 0.5, collision snap wall 0.368). The snap point is built on the faced
+      // side from this offset; capture is then measured along the item's own axis below.
+      const float SNAP_WALL_OFFSET = 0.132f;
       if (bestMultiBB.HasValue && !float.IsInfinity(bestMulti))
       {
         var bb = bestMultiBB.Value;
@@ -1775,9 +1773,14 @@ namespace HousingUnlocked
         if (faceAxis == 0) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, probes[0].Y, probes[0].Z); }
         else if (faceAxis == 1) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(probes[0].X, bbC.Y + bbE.Y * n.Y, probes[0].Z); }
         else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(probes[0].X, probes[0].Y, bbC.Z + bbE.Z * n.Z); }
-        var attachPt = faceC - n * (ITEM_DEPTH + SNAP_POINT_BIAS);
-        var snapD = Vector3.Distance(probes[0], attachPt);
-        bestMulti = snapD;   // REPLACE, not min: the nearest-face distance must not survive
+        var attachPt = faceC - n * SNAP_WALL_OFFSET;
+        var gap = Vector3.Distance(probes[0], attachPt);
+        // v1.15.114: capture is AXIAL travel along the item's own facing axis to the snap
+        // wall (author coordinates, RY70): perpendicular gap / |front . faceNormal|. At RY0
+        // the divisor is 1.0, so 0-degree results are unchanged; at RY70 it is 0.342, which
+        // is what the measured boundary shows.
+        var axialDot = MathF.Abs(Vector3.Dot(itemFront, n));
+        bestMulti = axialDot > 0.05f ? gap / axialDot : float.PositiveInfinity;
       }
       if (bestSingleBB.HasValue && !float.IsInfinity(bestSingle))
       {
@@ -1803,8 +1806,14 @@ namespace HousingUnlocked
         if (faceAxis == 0) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, probes[0].Y, probes[0].Z); }
         else if (faceAxis == 1) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(probes[0].X, bbC.Y + bbE.Y * n.Y, probes[0].Z); }
         else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(probes[0].X, probes[0].Y, bbC.Z + bbE.Z * n.Z); }
-        var attachS = faceC - n * (ITEM_DEPTH + SNAP_POINT_BIAS);
-        bestSingle = Vector3.Distance(probes[0], attachS);
+        var attachS = faceC - n * SNAP_WALL_OFFSET;
+        var gap = Vector3.Distance(probes[0], attachS);
+        // v1.15.114: capture is AXIAL travel along the item's own facing axis to the snap
+        // wall (author coordinates, RY70): perpendicular gap / |front . faceNormal|. At RY0
+        // the divisor is 1.0, so 0-degree results are unchanged; at RY70 it is 0.342, which
+        // is what the measured boundary shows.
+        var axialDot = MathF.Abs(Vector3.Dot(itemFront, n));
+        bestSingle = axialDot > 0.05f ? gap / axialDot : float.PositiveInfinity;
       }
 
       // Same model applies to SINGLE-face receivers (author, 2026-10-27: "the stage panel
