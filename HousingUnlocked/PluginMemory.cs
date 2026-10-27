@@ -2301,6 +2301,22 @@ namespace HousingUnlocked
     /// where it already is. Measured 2026-10-26: the Wall Lantern sat at wallD=0.000 on a
     /// Stage Panel for 960 frames while a White Rect was dragged past it, and never moved.
     /// </summary>
+    // True when a placed item's BaseId is a wall-mounted (category 15) furnishing. The
+    // debug truth scans only log wall fields, so every other item skips the native object
+    // walk - that walk produced the AccessViolation crash on 2026-10-27.
+    private bool IsWallItemBaseId(uint baseId)
+    {
+      if (!_furnitureCategoryCache.TryGetValue(baseId, out var cat))
+      {
+        uint resolved = 0;
+        if (Plugin.TryGetFurnishing(baseId, out var f)) resolved = (uint)f.HousingItemCategory;
+        else if (Plugin.TryGetYardObject(baseId, out var y)) resolved = (uint)y.HousingItemCategory;
+        _furnitureCategoryCache[baseId] = resolved;
+        cat = resolved;
+      }
+      return cat == 15;
+    }
+
     private unsafe bool FindNearestWallReceiver(
       Vector3 probe, Vector3 itemFront, float limit, nint skipGroupA, nint skipGroupB,
       out float dist, out string name, out nint group, out bool isTerritory,
@@ -3007,7 +3023,7 @@ namespace HousingUnlocked
                   try
                   {
                     var eg = go->SharedGroupLayoutInstance;
-                    if (eg != null)
+                    if (eg != null && SnapLogger.Enabled && IsWallItemBaseId(go->BaseId))
                     {
                       var ep = new Vector3(p.X, p.Y, p.Z);
                       var ef = Vector3.Transform(Vector3.UnitZ, eg->Transform.Rotation);
@@ -3106,7 +3122,7 @@ namespace HousingUnlocked
                   try
                   {
                     var pg = go->SharedGroupLayoutInstance;
-                    if (pg != null)
+                    if (pg != null && SnapLogger.Enabled && _cachedActiveItemCategory == 15)
                     {
                       var pp = new Vector3(go->Position.X, go->Position.Y, go->Position.Z);
                       var pf = Vector3.Transform(Vector3.UnitZ, pg->Transform.Rotation);
@@ -3181,7 +3197,7 @@ namespace HousingUnlocked
                     try
                     {
                       var lg = go->SharedGroupLayoutInstance;
-                      if (lg != null)
+                      if (lg != null && SnapLogger.Enabled && IsWallItemBaseId(go->BaseId))
                       {
                         var lp = new Vector3(p.X, p.Y, p.Z);
                         var lf = Vector3.Transform(Vector3.UnitZ, lg->Transform.Rotation);

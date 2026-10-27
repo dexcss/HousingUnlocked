@@ -27,6 +27,11 @@ namespace HousingUnlocked
     public bool ShowTableSnapWarning { get; set; } = true;
     public bool ShowWallSnapWarning { get; set; } = true;
 
+    // Session logging is opt-in: nothing is written to disk for users who never asked for
+    // it. Start a session on demand with /hu log or the Advanced button, or turn this on to
+    // restore the old "auto start when the main window opens" behaviour.
+    public bool AutoStartSessionLog { get; set; } = false;
+
     // Which side's SphereCastRange drives the item-to-item snap distance:
     // Either = max(active, placed); Sum = active + placed; PlacedOnly = placed only.
     public ItemSnapRangeMode ItemSnapRangeMode { get; set; } = ItemSnapRangeMode.Either;

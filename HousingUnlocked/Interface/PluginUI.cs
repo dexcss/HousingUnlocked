@@ -24,14 +24,18 @@ namespace HousingUnlocked.Interface
 
     public void Draw()
     {
-      // Snap logger auto start/stop with the main window (manual /hu log overrides).
-      if (Main.IsOpen)
+      // Session logging is opt-in (Configuration.AutoStartSessionLog). By default no log
+      // file is created; /hu log or the Advanced button still starts one on demand.
+      if (Plugin.GetConfiguration().AutoStartSessionLog)
       {
-        if (!SnapLogger.Enabled && !SnapLogger.ManualOverride)
-          SnapLogger.Start("main window opened");
+        if (Main.IsOpen)
+        {
+          if (!SnapLogger.Enabled && !SnapLogger.ManualOverride)
+            SnapLogger.Start("main window opened");
+        }
+        else if (SnapLogger.Enabled && !SnapLogger.ManualOverride)
+          SnapLogger.Stop("main window closed");
       }
-      else if (SnapLogger.Enabled && !SnapLogger.ManualOverride)
-        SnapLogger.Stop("main window closed");
 
       Gizmo.Draw();
       Windows.Draw();
