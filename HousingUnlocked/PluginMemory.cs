@@ -3029,12 +3029,18 @@ namespace HousingUnlocked
                       var ef = Vector3.Transform(Vector3.UnitZ, eg->Transform.Rotation);
                       FindNearestWallReceiver(ep, ef, 2f, (nint)eg, 0,
                         out var end, out var enn, out _, out var eterr);
-                      exitTruth = $" nearest=\"{enn}\"{(eterr ? "(terr)" : "")} nd={end:0.###} attached={(end <= 0.05f ? 1 : 0)}";
+                      exitTruth = $" nearest=\"{enn}\"{(eterr ? "(terr)" : "")} nd={end:0.###} attached={(end <= 0.12f ? 1 : 0)}";
                     }
                   }
                   catch { }
+                  // `before` is where the item was PLACED (snapshot refreshed on deselect),
+                  // so this delta is the deferred snap. Beyond the 1.0 capture it cannot be
+                  // a snap - it is the layout restoring a drag (label it, do not calibrate on it).
+                  var exitMag = Vector3.Distance(p, prev);
+                  var exitVerdict = exitMag <= 1.05f ? "snap" : "revert";
                   SnapLogger.Event("housing_exit_snap",
-                    $"baseId={go->BaseId} before=[{prev.X:0.####},{prev.Y:0.####},{prev.Z:0.####}] after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}]{exitTruth}");
+                    $"baseId={go->BaseId} moved={exitMag:0.###} verdict={exitVerdict} " +
+                    $"before=[{prev.X:0.####},{prev.Y:0.####},{prev.Z:0.####}] after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}]{exitTruth}");
                 }
                 _lastLayoutSnapshot[key] = p;
               }
@@ -3128,7 +3134,7 @@ namespace HousingUnlocked
                       var pf = Vector3.Transform(Vector3.UnitZ, pg->Transform.Rotation);
                       FindNearestWallReceiver(pp, pf, 2f, (nint)pg, 0,
                         out var nd, out var nn, out _, out var isTerr);
-                      var attached = nd <= 0.05f ? 1 : 0;
+                      var attached = nd <= 0.12f ? 1 : 0;
                       // PRE-SNAP ONLY: the engine applies wall snaps when the housing
                       // interface EXITS, not on deselect, so this reading is taken before
                       // the snap and is NOT the verdict. The authoritative one is on
@@ -3140,6 +3146,9 @@ namespace HousingUnlocked
                     }
                   }
                   catch { }
+                  // v1.15.116: snapshot the PLACED position. The next housing_exit_snap
+                  // then measures only the engine's deferred snap, not the revert of a drag.
+                  _lastLayoutSnapshot[_pendingPostSnapGroup] = p;
                   SnapLogger.Event("POSTSNAP_FINAL",
                     $"item={_pendingPostSnapItemId} before=[{_lastActiveGroupPos.X:0.####},{_lastActiveGroupPos.Y:0.####},{_lastActiveGroupPos.Z:0.####}] " +
                     $"after=[{p.X:0.####},{p.Y:0.####},{p.Z:0.####}] delta=[{dx:0.####},{dy:0.####},{dz:0.####}] mag={MathF.Sqrt(dx * dx + dy * dy + dz * dz):0.####}{truthDiag}");
