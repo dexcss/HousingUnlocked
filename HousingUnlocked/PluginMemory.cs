@@ -1740,6 +1740,7 @@ namespace HousingUnlocked
       if (!float.IsInfinity(singlePerp) && singlePerp < bestSingle) bestSingle = singlePerp;
 
       // Replace with distance to the snap point on the faced side, when we have the receiver AABB.
+      const float ITEM_DEPTH = 0.13f;   // lantern depth (face 0.503 - attach 0.3683)
       if (bestMultiBB.HasValue && !float.IsInfinity(bestMulti))
       {
         var bb = bestMultiBB.Value;
@@ -1750,10 +1751,22 @@ namespace HousingUnlocked
         if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, bbC.Y, bbC.Z); }
         else if (ay >= az) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(bbC.X, bbC.Y + bbE.Y * n.Y, bbC.Z); }
         else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(bbC.X, bbC.Y, bbC.Z + bbE.Z * n.Z); }
-        const float ITEM_DEPTH = 0.13f;
         var attachPt = faceC - n * ITEM_DEPTH;
         var snapD = Vector3.Distance(probes[0], attachPt);
-        if (snapD < bestMulti) bestMulti = snapD;
+        bestMulti = snapD;   // REPLACE, not min: the nearest-face distance must not survive
+      }
+      if (bestSingleBB.HasValue && !float.IsInfinity(bestSingle))
+      {
+        var bb = bestSingleBB.Value;
+        var bbC = (bb.Min + bb.Max) * 0.5f;
+        var bbE = (bb.Max - bb.Min) * 0.5f;
+        var ax = MathF.Abs(itemFront.X); var ay = MathF.Abs(itemFront.Y); var az = MathF.Abs(itemFront.Z);
+        Vector3 n, faceC;
+        if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, bbC.Y, bbC.Z); }
+        else if (ay >= az) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(bbC.X, bbC.Y + bbE.Y * n.Y, bbC.Z); }
+        else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(bbC.X, bbC.Y, bbC.Z + bbE.Z * n.Z); }
+        var attachS = faceC - n * ITEM_DEPTH;
+        bestSingle = Vector3.Distance(probes[0], attachS);
       }
 
       // Same model applies to SINGLE-face receivers (author, 2026-10-27: "the stage panel
