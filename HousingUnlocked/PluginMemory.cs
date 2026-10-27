@@ -1840,8 +1840,7 @@ namespace HousingUnlocked
       var alignDot = float.NaN;
       if (!float.IsInfinity(bestFurn) && winN != Vector3.Zero)
         alignDot = MathF.Abs(Vector3.Dot(itemFront, winN));
-      var reachScale = float.IsNaN(alignDot) ? 1f : alignDot;
-      if (reachScale < 0.05f) reachScale = 0.05f;   // never reach 0
+      var reachScale = 1f;   // DISABLED (v1.15.103): the angle scaling regressed the through-item case
 
       // STRICT comparison: the engine snaps at 0.99 but NOT at exactly 1.0 (author,
       // 2026-10-27). Using <= accepted the boundary itself and produced a false positive
