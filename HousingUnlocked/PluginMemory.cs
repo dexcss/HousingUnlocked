@@ -1746,6 +1746,11 @@ namespace HousingUnlocked
       // card said "no snap". Projecting the pivot onto the faced plane cancels X/Y and leaves
       // only the axial delta: 0.3683 -> 0.002, 1.3787 -> 1.009, -0.6417 -> 1.012.
       const float ITEM_DEPTH = 0.13f;   // lantern depth (face 0.503 - attach 0.3683)
+      // v1.15.109: measured asymmetry (author, 2026-10-27). Exactly +1.0 forward does NOT
+      // snap, exactly -1.0 backwards through the wall DOES. Same 0.01 on both sides: the snap
+      // point sits this much further from the faced face than ITEM_DEPTH alone, which shrinks
+      // the forward reach and grows the backward reach. 0.01 is the measured step.
+      const float SNAP_POINT_BIAS = 0.01f;
       if (bestMultiBB.HasValue && !float.IsInfinity(bestMulti))
       {
         var bb = bestMultiBB.Value;
@@ -1756,7 +1761,7 @@ namespace HousingUnlocked
         if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, probes[0].Y, probes[0].Z); }
         else if (ay >= az) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(probes[0].X, bbC.Y + bbE.Y * n.Y, probes[0].Z); }
         else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(probes[0].X, probes[0].Y, bbC.Z + bbE.Z * n.Z); }
-        var attachPt = faceC - n * ITEM_DEPTH;
+        var attachPt = faceC - n * (ITEM_DEPTH + SNAP_POINT_BIAS);
         var snapD = Vector3.Distance(probes[0], attachPt);
         bestMulti = snapD;   // REPLACE, not min: the nearest-face distance must not survive
       }
@@ -1770,7 +1775,7 @@ namespace HousingUnlocked
         if (ax >= ay && ax >= az) { n = new Vector3(MathF.Sign(itemFront.X == 0 ? 1 : itemFront.X), 0, 0); faceC = new Vector3(bbC.X + bbE.X * n.X, probes[0].Y, probes[0].Z); }
         else if (ay >= az) { n = new Vector3(0, MathF.Sign(itemFront.Y == 0 ? 1 : itemFront.Y), 0); faceC = new Vector3(probes[0].X, bbC.Y + bbE.Y * n.Y, probes[0].Z); }
         else { n = new Vector3(0, 0, MathF.Sign(itemFront.Z == 0 ? 1 : itemFront.Z)); faceC = new Vector3(probes[0].X, probes[0].Y, bbC.Z + bbE.Z * n.Z); }
-        var attachS = faceC - n * ITEM_DEPTH;
+        var attachS = faceC - n * (ITEM_DEPTH + SNAP_POINT_BIAS);
         bestSingle = Vector3.Distance(probes[0], attachS);
       }
 
