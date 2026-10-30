@@ -13,7 +13,7 @@ namespace HousingUnlocked.Interface
   /// </summary>
   public abstract class ShellWindow : Window
   {
-    private const float TopInsetPx = 6f;
+    private const float TopInsetPx = 2f;
     private const float HeaderHeightPx = 42f;
 
     private readonly string _title;
