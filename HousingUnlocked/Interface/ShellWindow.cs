@@ -1,3 +1,4 @@
+using System;
 using System.Numerics;
 
 using Dalamud.Bindings.ImGui;
@@ -7,11 +8,14 @@ using Dalamud.Interface.Windowing;
 namespace HousingUnlocked.Interface
 {
   /// <summary>
-  /// Borderless Fancy UI window shell: custom draggable title bar with an accent dot, a close
-  /// button, and a padded body region. Windows deriving from this must implement DrawBody().
+  /// Borderless Fancy UI window shell: a black buffer strip, a custom title bar with an accent
+  /// bar, a close button, a bottom-right resize grip, and a padded body region.
   /// </summary>
   public abstract class ShellWindow : Window
   {
+    private const float TopInsetPx = 6f;
+    private const float HeaderHeightPx = 42f;
+
     private readonly string _title;
     private bool _dragging;
 
@@ -24,7 +28,7 @@ namespace HousingUnlocked.Interface
       _title = title;
       SizeConstraints = new WindowSizeConstraints
       {
-        MinimumSize = minSize ?? new Vector2(420, 320),
+        MinimumSize = minSize ?? new Vector2(420, 300),
         MaximumSize = maxSize ?? new Vector2(1600, 1400),
       };
     }
@@ -42,18 +46,24 @@ namespace HousingUnlocked.Interface
       var pos = ImGui.GetWindowPos();
       var size = ImGui.GetWindowSize();
       var dl = ImGui.GetWindowDrawList();
-      var headerH = 42f * s;
 
-      // Header plate.
-      dl.AddRectFilled(pos, pos + new Vector2(size.X, headerH), Theme.U32(Theme.Surface),
-        Theme.RadiusCard, ImDrawFlags.RoundCornersTop);
-      dl.AddLine(new Vector2(pos.X, pos.Y + headerH), new Vector2(pos.X + size.X, pos.Y + headerH),
-        Theme.U32(Theme.Border), 1f * s);
+      var topInset = TopInsetPx * s;
+      var headerH = HeaderHeightPx * s;
+      var headerTop = pos.Y + topInset;
 
-      // Drag from anywhere in the header.
+      // Paint the whole window body so the top buffer is exactly WindowBg.
+      dl.AddRectFilled(pos, pos + size, Theme.U32(Theme.WindowBg), Theme.RadiusCard);
+
+      // Header plate: square top edge, sits below the buffer strip.
+      dl.AddRectFilled(new Vector2(pos.X, headerTop),
+        new Vector2(pos.X + size.X, headerTop + headerH), Theme.U32(Theme.Surface));
+      dl.AddLine(new Vector2(pos.X, headerTop + headerH),
+        new Vector2(pos.X + size.X, headerTop + headerH), Theme.U32(Theme.Border), 1f * s);
+
+      // Drag from the header.
       var mouse = ImGui.GetIO().MousePos;
       var inHeader = mouse.X >= pos.X && mouse.X <= pos.X + size.X
-                  && mouse.Y >= pos.Y && mouse.Y <= pos.Y + headerH;
+                  && mouse.Y >= headerTop && mouse.Y <= headerTop + headerH;
       if (inHeader && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
         _dragging = true;
       if (!ImGui.IsMouseDown(ImGuiMouseButton.Left))
@@ -61,33 +71,58 @@ namespace HousingUnlocked.Interface
       if (_dragging)
         ImGui.SetWindowPos(pos + ImGui.GetIO().MouseDelta);
 
-      // Accent dot + title.
-      var titleY = pos.Y + (headerH - ImGui.GetTextLineHeight()) * 0.5f;
-      dl.AddRectFilled(new Vector2(pos.X + 14f * s, pos.Y + headerH * 0.5f - 3f * s),
-        new Vector2(pos.X + 20f * s, pos.Y + headerH * 0.5f + 3f * s), Theme.U32(Theme.Accent), Theme.RadiusTag);
+      // Accent bar + title.
+      var titleY = headerTop + (headerH - ImGui.GetTextLineHeight()) * 0.5f;
+      dl.AddRectFilled(new Vector2(pos.X + 14f * s, headerTop + headerH * 0.5f - 3f * s),
+        new Vector2(pos.X + 20f * s, headerTop + headerH * 0.5f + 3f * s), Theme.U32(Theme.Accent), Theme.RadiusTag);
       dl.AddText(new Vector2(pos.X + 28f * s, titleY), Theme.U32(Theme.Text), _title);
-
-      DrawHeaderExtras(pos, size, headerH);
 
       // Close button.
       var close = 26f;
       ImGui.SetCursorScreenPos(new Vector2(
         pos.X + size.X - (close * s) - 8f * s,
-        pos.Y + (headerH - close * s) * 0.5f));
+        headerTop + (headerH - close * s) * 0.5f));
       if (UiKit.IconButton("##hu-close", FontAwesomeIcon.Times, "Close", false, close))
         IsOpen = false;
 
       // Body.
-      ImGui.SetCursorScreenPos(new Vector2(pos.X + Theme.Pad, pos.Y + headerH + Theme.Pad));
-      var bodySize = new Vector2(size.X - Theme.Pad * 2f, size.Y - headerH - Theme.Pad * 2f);
+      ImGui.SetCursorScreenPos(new Vector2(pos.X + Theme.Pad, headerTop + headerH + Theme.Pad));
+      var bodySize = new Vector2(size.X - Theme.Pad * 2f - 8f * s,
+        size.Y - topInset - headerH - Theme.Pad * 2f - 8f * s);
       if (ImGui.BeginChild("##hu-body", bodySize, false, ImGuiWindowFlags.None))
         DrawBody();
       ImGui.EndChild();
+
+      DrawResizeGrip(pos, size);
     }
 
-    /// <summary>Hook for a title-bar status chip or similar; default draws nothing.</summary>
-    protected virtual void DrawHeaderExtras(Vector2 pos, Vector2 size, float headerH)
+    /// <summary>Visible bottom-right grip; the window is resizable even if the native border is not.</summary>
+    private void DrawResizeGrip(Vector2 pos, Vector2 size)
     {
+      var s = Theme.UiScale;
+      var box = 14f * s;
+      var gp = new Vector2(pos.X + size.X - box - 2f * s, pos.Y + size.Y - box - 2f * s);
+
+      ImGui.SetCursorScreenPos(gp);
+      ImGui.InvisibleButton("##hu-resize", new Vector2(box, box));
+      var hovered = ImGui.IsItemHovered();
+      var active = ImGui.IsItemActive();
+
+      var dl = ImGui.GetWindowDrawList();
+      var col = active || hovered ? Theme.Accent : Theme.Muted;
+      for (var i = 0; i < 3; i++)
+      {
+        var off = (4f + i * 4f) * s;
+        dl.AddLine(new Vector2(gp.X + box - off, gp.Y + box),
+          new Vector2(gp.X + box, gp.Y + box - off), Theme.U32(col), 1.5f * s);
+      }
+
+      if (active && ImGui.IsMouseDragging(ImGuiMouseButton.Left))
+      {
+        var d = ImGui.GetIO().MouseDelta;
+        var min = new Vector2(420f * s, 300f * s);
+        ImGui.SetWindowSize(new Vector2(Math.Max(min.X, size.X + d.X), Math.Max(min.Y, size.Y + d.Y)));
+      }
     }
   }
 }
