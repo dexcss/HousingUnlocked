@@ -20,10 +20,8 @@ namespace HousingUnlocked.Interface.Components
 
     private static float Drag => Configuration.Drag;
 
-    // Axis colours keep their identities but are retoned to the plugin palette.
-    private static readonly Vector4 Red = Theme.AxisX;
-    private static readonly Vector4 Green = Theme.AxisY;
-    private static readonly Vector4 Blue = Theme.AxisZ;
+    private static readonly Vector4 Red = Theme.Warn;
+    private static readonly Vector4 Green = Theme.Good;
     private static readonly Vector4 Gold = Theme.Accent;
 
     private float? lockX;
@@ -134,22 +132,22 @@ namespace HousingUnlocked.Interface.Components
 
       if (Configuration.ShowWallSnapWarning && Memory.LastReverseWallHit)
       {
+        ImGui.Spacing();
         ImGui.TextColored(Red, $"-> {Memory.LastReverseWallNames} will snap here");
         if (ImGui.IsItemHovered())
           ImGui.SetTooltip("Placed wall item(s) re-attach to the item you are holding when the housing menu is closed.");
       }
 
       ImGui.Spacing();
-      ImGui.TextColored(Gold, "POSITION");
-      ImGui.Separator();
+      UiKit.Section(FontAwesomeIcon.Cube, "transform");
 
-      DrawPositionRow("X", ref Memory.Position.X, ref lockX, Red);
-      DrawPositionRow("Y", ref Memory.Position.Y, ref lockY, Green, inSnapZone);
-      DrawPositionRow("Z", ref Memory.Position.Z, ref lockZ, Blue);
+      DrawPositionRow("X", ref Memory.Position.X, ref lockX, Theme.AxisX);
+      DrawPositionRow("Y", ref Memory.Position.Y, ref lockY, Theme.AxisY, inSnapZone);
+      DrawPositionRow("Z", ref Memory.Position.Z, ref lockZ, Theme.AxisZ);
       DrawRotationRow();
 
       ImGui.Spacing();
-      if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Copy, "Copy"))
+      if (UiKit.TextIconButton("##hu-copy", FontAwesomeIcon.Copy, "Copy"))
       {
         copyPosition = Memory.Position;
         copyRotation = Memory.Rotation.Y;
@@ -157,10 +155,10 @@ namespace HousingUnlocked.Interface.Components
       if (ImGui.IsItemHovered())
         ImGui.SetTooltip("Copy position & rotation");
 
-      ImGui.SameLine();
+      ImGui.SameLine(0, Theme.Gap);
 
       ImGui.BeginDisabled(copyPosition == null || copyRotation == null);
-      if (ImGuiComponents.IconButtonWithText(FontAwesomeIcon.Paste, "Paste") && copyPosition != null && copyRotation != null)
+      if (UiKit.TextIconButton("##hu-paste", FontAwesomeIcon.Paste, "Paste") && copyPosition != null && copyRotation != null)
       {
         Memory.WritePosition(copyPosition.Value);
         Memory.WriteRotation(Memory.Rotation with { Y = copyRotation.Value });
@@ -251,8 +249,8 @@ namespace HousingUnlocked.Interface.Components
 
       var dl = ImGui.GetWindowDrawList();
       var max = p + new Vector2(width, height);
-      var radius = 7f * scale;
-      // State glow, then an indigo gradient body — no stock warning red anywhere.
+      var radius = Theme.RadiusCard;
+      // State glow, then a violet gradient body — blocky, no stock warning red.
       dl.AddRectFilled(p, max, ImGui.GetColorU32(good ? Theme.GoodSoft : Theme.WarnSoft), radius);
       var topTint = good
         ? new Vector4(.086f, .169f, .184f, .92f)
@@ -264,8 +262,9 @@ namespace HousingUnlocked.Interface.Components
         new Vector2(p.X + 5f * scale, max.Y - 3f * scale), ImGui.GetColorU32(color), 2f * scale);
       dl.AddRect(p, max, ImGui.GetColorU32(new Vector4(color.X, color.Y, color.Z, .55f)),
         radius, ImDrawFlags.None, 1.2f * scale);
-      dl.AddCircleFilled(new Vector2(p.X + pad + 5f * scale, p.Y + height / 2f), 4f * scale, ImGui.GetColorU32(color));
-      dl.AddText(new Vector2(p.X + pad + 16f * scale, p.Y + pad), ImGui.GetColorU32(color), text);
+      dl.AddRectFilled(new Vector2(p.X + pad + 2f * scale, p.Y + height / 2f - 4f * scale),
+        new Vector2(p.X + pad + 10f * scale, p.Y + height / 2f + 4f * scale), ImGui.GetColorU32(color), Theme.RadiusTag);
+      dl.AddText(new Vector2(p.X + pad + 18f * scale, p.Y + pad), ImGui.GetColorU32(color), text);
 
       if (hovered)
         DrawStatusTooltip(shownSummary: summary);
@@ -340,11 +339,10 @@ namespace HousingUnlocked.Interface.Components
       if (changed || wheelMoved)
         Memory.WritePosition(Memory.Position);
 
-      ImGui.SameLine();
-      if (ImGuiComponents.IconButton((int)ImGui.GetID(label), locked == null ? FontAwesomeIcon.Unlock : FontAwesomeIcon.Lock))
+      ImGui.SameLine(0, Theme.Gap);
+      if (UiKit.IconButton("##hu-lock-" + label, locked == null ? FontAwesomeIcon.Unlock : FontAwesomeIcon.Lock,
+            locked == null ? "Lock this axis" : "Unlock this axis", size: 24f))
         locked = locked == null ? value : null;
-      if (ImGui.IsItemHovered())
-        ImGui.SetTooltip(locked == null ? "Lock this axis" : "Unlock this axis");
     }
 
     private void DrawRotationRow()
