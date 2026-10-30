@@ -26,6 +26,12 @@ namespace HousingUnlocked.Interface
             | ImGuiWindowFlags.NoCollapse)
     {
       _title = title;
+      // Size must NOT be re-applied every frame: Dalamud's WindowHost calls
+      // SetNextWindowSize(Size, SizeCondition) on every draw while Size is set, which
+      // overrides user resizing (and the resize grip). FirstUseEver gives a default size
+      // without pinning it.
+      Size = new Vector2(580, 520);
+      SizeCondition = ImGuiCond.FirstUseEver;
       SizeConstraints = new WindowSizeConstraints
       {
         MinimumSize = minSize ?? new Vector2(420, 300),

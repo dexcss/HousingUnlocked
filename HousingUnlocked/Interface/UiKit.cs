@@ -244,6 +244,46 @@ namespace HousingUnlocked.Interface
       ImGui.Dummy(size);
     }
 
+    // ----------------------------------------------------------------- chip
+
+    /// <summary>Compact rectangular button used for row/grid controls (also a toggle chip).</summary>
+    public static bool ChipButton(string id, string label, bool active = false, float width = 0f, string tooltip = "")
+    {
+      var s = Theme.UiScale;
+      var tsz = ImGui.CalcTextSize(label);
+      if (width <= 0f)
+        width = tsz.X + 20f * s;
+
+      var h = 24f * s;
+      var p = ImGui.GetCursorScreenPos();
+
+      ImGui.InvisibleButton(id, new Vector2(width, h));
+      var hovered = ImGui.IsItemHovered();
+      var clicked = ImGui.IsItemClicked();
+
+      var dl = ImGui.GetWindowDrawList();
+      var max = p + new Vector2(width, h);
+      var bg = active ? Theme.Accent : hovered ? Theme.SurfaceAlt : Theme.Surface;
+      dl.AddRectFilled(p, max, Theme.U32(bg), Theme.RadiusControl);
+      dl.AddRect(p, max, Theme.U32(active ? Theme.Accent : Theme.Border), Theme.RadiusControl, ImDrawFlags.None, 1f * s);
+
+      var col = active ? Theme.WindowBg : hovered ? Theme.Text : Theme.Muted;
+      dl.AddText(new Vector2(p.X + (width - tsz.X) * 0.5f, p.Y + (h - tsz.Y) * 0.5f), Theme.U32(col), label);
+
+      if (tooltip.Length > 0 && hovered)
+        ImGui.SetTooltip(tooltip);
+
+      return clicked;
+    }
+
+    /// <summary>Chip that flips a boolean: returns the new value.</summary>
+    public static bool ToggleChip(string id, string label, bool value, float width = 0f, string tooltip = "")
+    {
+      if (ChipButton(id, label, value, width, tooltip))
+        value = !value;
+      return value;
+    }
+
     // ------------------------------------------------------------- helpers
 
     /// <summary>Label on the left, switch on the right, one row high. Returns the new value.</summary>

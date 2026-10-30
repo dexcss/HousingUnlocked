@@ -11,8 +11,8 @@ using HousingUnlocked.Interface.Components;
 namespace HousingUnlocked.Interface.Windows
 {
   /// <summary>
-  /// Fancy UI main window: borderless shell with a left rail (Item / Settings / About) and
-  /// card-based pages. All bindings to configuration and memory are unchanged.
+  /// Fancy UI main window: one scrollable page with the snap status, transform controls, and all
+  /// settings. Borderless shell from <see cref="ShellWindow"/>; behaviour is unchanged.
   /// </summary>
   public class MainWindow : ShellWindow
   {
@@ -22,20 +22,13 @@ namespace HousingUnlocked.Interface.Windows
     private readonly Gizmo _gizmo;
     private readonly ItemControls _itemControls = new();
 
-    private const int PageItem = 0;
-    private const int PageSettings = 1;
-    private const int PageAbout = 2;
-
-    private int _page = PageItem;
-
     public bool Reset;
 
     public MainWindow(Gizmo gizmo)
       : base("Housing Unlocked##HousingUnlocked", "Housing Unlocked",
-        new Vector2(460, 360), new Vector2(900, 1400))
+        new Vector2(480, 300), new Vector2(1000, 1600))
     {
       _gizmo = gizmo;
-      Size = new Vector2(560, 560);
     }
 
     public override void PreDraw()
@@ -50,43 +43,64 @@ namespace HousingUnlocked.Interface.Windows
     protected override void DrawBody()
     {
       var s = Theme.UiScale;
-      var railW = 42f * s;
 
-      ImGui.BeginChild("##hu-rail", new Vector2(railW, 0), false, ImGuiWindowFlags.NoScrollbar);
-      if (UiKit.IconButton("##hu-tab-item", FontAwesomeIcon.Cube, "Item", _page == PageItem, 32f))
-        _page = PageItem;
-      ImGui.Dummy(new Vector2(0, 4f * s));
-      if (UiKit.IconButton("##hu-tab-settings", FontAwesomeIcon.Cog, "Settings", _page == PageSettings, 32f))
-        _page = PageSettings;
-      ImGui.Dummy(new Vector2(0, 4f * s));
-      if (UiKit.IconButton("##hu-tab-about", FontAwesomeIcon.InfoCircle, "About", _page == PageAbout, 32f))
-        _page = PageAbout;
-      ImGui.EndChild();
+      DrawQuickToggles();
+      ImGui.Dummy(new Vector2(0, Theme.Gap));
 
-      ImGui.SameLine(0, Theme.Gap);
-      ImGui.BeginChild("##hu-page", new Vector2(0, 0), false, ImGuiWindowFlags.None);
-      switch (_page)
-      {
-        case PageSettings:
-          DrawSettingsPage();
-          break;
-        case PageAbout:
-          DrawAboutPage();
-          break;
-        default:
-          DrawItemPage();
-          break;
-      }
-      ImGui.EndChild();
+      DrawItemSection();
+      ImGui.Dummy(new Vector2(0, Theme.Gap));
+
+      DrawControlsSection();
+      DrawWarningsSection();
+      DrawInventorySection();
+      DrawMaintenanceSection();
+      DrawAboutSection();
+
+      _ = s;
     }
 
-    // ------------------------------------------------------------------ item
+    // ------------------------------------------------------------ quick row
 
-    private unsafe void DrawItemPage()
+    private void DrawQuickToggles()
     {
-      var s = Theme.UiScale;
-      DrawQuickToggles();
+      var avail = ImGui.GetContentRegionAvail().X;
+      var w = (avail - 2f * Theme.Gap) / 3f;
 
+      var placeAnywhere = Configuration.PlaceAnywhere;
+      var newPlaceAnywhere = UiKit.ToggleChip("##hu-chip-pa", "Place Anywhere", placeAnywhere, w,
+        "Place objects without the engine's placement limits.");
+      if (newPlaceAnywhere != placeAnywhere)
+      {
+        PluginMemory.SetPlaceAnywhere(newPlaceAnywhere);
+        Configuration.PlaceAnywhere = newPlaceAnywhere;
+        Configuration.Save();
+      }
+
+      ImGui.SameLine(0, Theme.Gap);
+      var useGizmo = Configuration.UseGizmo;
+      var newUseGizmo = UiKit.ToggleChip("##hu-chip-gizmo", "Gizmo", useGizmo, w,
+        "Show a movement gizmo on the selected item.");
+      if (newUseGizmo != useGizmo)
+      {
+        Configuration.UseGizmo = newUseGizmo;
+        Configuration.Save();
+      }
+
+      ImGui.SameLine(0, Theme.Gap);
+      var doSnap = Configuration.DoSnap;
+      var newDoSnap = UiKit.ToggleChip("##hu-chip-snap", "Snap grid", doSnap, w,
+        "Snap gizmo movement to the drag grid.");
+      if (newDoSnap != doSnap)
+      {
+        Configuration.DoSnap = newDoSnap;
+        Configuration.Save();
+      }
+    }
+
+    // ----------------------------------------------------------------- item
+
+    private unsafe void DrawItemSection()
+    {
       if (Memory.HousingStructure == null || Memory.HousingStructure->Mode == HousingLayoutMode.None)
         DrawHint("Enter housing mode to get started.");
       else if (PluginMemory.GamepadMode)
@@ -98,179 +112,144 @@ namespace HousingUnlocked.Interface.Windows
         _itemControls.Draw();
     }
 
-    private void DrawQuickToggles()
+    // ------------------------------------------------------------- controls
+
+    private void DrawControlsSection()
     {
       var s = Theme.UiScale;
-      var rowH = 26f * s;
-      var (min, max) = UiKit.BeginCard(3f * rowH + Theme.Pad * 2f);
-      var x = min.X + Theme.Pad;
-      var right = max.X - Theme.Pad;
-      var y = min.Y + Theme.Pad;
-
-      var placeAnywhere = Configuration.PlaceAnywhere;
-      var newPlaceAnywhere = SwitchRow("Place Anywhere", placeAnywhere,
-        "Place objects without the engine's placement limits.", new Vector2(x, y), right, rowH);
-      if (newPlaceAnywhere != placeAnywhere)
-      {
-        PluginMemory.SetPlaceAnywhere(newPlaceAnywhere);
-        Configuration.PlaceAnywhere = newPlaceAnywhere;
-        Configuration.Save();
-      }
-
-      y += rowH;
-      var useGizmo = Configuration.UseGizmo;
-      var newUseGizmo = SwitchRow("Gizmo", useGizmo,
-        "Show a movement gizmo on the selected item.", new Vector2(x, y), right, rowH);
-      if (newUseGizmo != useGizmo)
-      {
-        Configuration.UseGizmo = newUseGizmo;
-        Configuration.Save();
-      }
-
-      y += rowH;
-      var doSnap = Configuration.DoSnap;
-      var newDoSnap = SwitchRow("Snap to grid", doSnap,
-        "Snap gizmo movement to the drag grid.", new Vector2(x, y), right, rowH);
-      if (newDoSnap != doSnap)
-      {
-        Configuration.DoSnap = newDoSnap;
-        Configuration.Save();
-      }
-    }
-
-    /// <summary>Label on the left, switch on the right; returns the (possibly new) value.</summary>
-    private static bool SwitchRow(string label, bool value, string tooltip, Vector2 at, float rightEdge, float rowH)
-    {
-      var s = Theme.UiScale;
-      ImGui.SetCursorScreenPos(new Vector2(at.X, at.Y + (rowH - ImGui.GetTextLineHeight()) * 0.5f));
-      ImGui.TextColored(Theme.Text, label);
-      if (tooltip.Length > 0 && ImGui.IsItemHovered())
-        ImGui.SetTooltip(tooltip);
-
-      ImGui.SetCursorScreenPos(new Vector2(rightEdge - 40f * s, at.Y + (rowH - 22f * s) * 0.5f));
-      return UiKit.Toggle("##hu-sw-" + label, value);
-    }
-
-    // -------------------------------------------------------------- settings
-
-    private void DrawSettingsPage()
-    {
-      var s = Theme.UiScale;
-
       UiKit.Section(FontAwesomeIcon.Wrench, "controls");
 
-      ImGui.TextColored(Theme.Text, "Drag step");
-      if (ImGui.IsItemHovered())
-        ImGui.SetTooltip("Step for the +/- buttons, mouse wheel, and gizmo snap.");
+      ImGui.TextColored(Theme.Text, "Drag");
       ImGui.SameLine(0, Theme.Gap);
-      ImGui.SetNextItemWidth(100f * s);
+      ImGui.SetNextItemWidth(80f * s);
       var drag = Configuration.Drag;
       if (ImGui.InputFloat("##hu-drag", ref drag, 0.01f, 0f, "%.3f"))
       {
         Configuration.Drag = Math.Clamp(drag, 0.001f, 10f);
         Configuration.Save();
       }
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Step for the +/- buttons, mouse wheel, and gizmo snap.");
 
-      ImGui.Spacing();
-      ImGui.TextColored(Theme.Text, "Gizmo space");
-      ImGui.SameLine(0, Theme.Gap);
+      ImGui.SameLine(0, Theme.Gap * 2f);
       var local = _gizmo.Mode == ImGuizmoMode.Local;
-      if (UiKit.TextIconButton("##hu-gizmo-space", local ? FontAwesomeIcon.ArrowsAlt : FontAwesomeIcon.Globe,
-            local ? "Local" : "World"))
+      if (UiKit.ChipButton("##hu-gizmo-space", local ? "Gizmo: Local" : "Gizmo: World"))
         _gizmo.Mode = local ? ImGuizmoMode.World : ImGuizmoMode.Local;
       if (ImGui.IsItemHovered())
         ImGui.SetTooltip("Gizmo axes: local item space or world space.");
+    }
 
-      ImGui.Dummy(new Vector2(0, Theme.Gap));
-      UiKit.Section(FontAwesomeIcon.ExclamationTriangle, "snap warnings");
+    // ------------------------------------------------------------- warnings
 
-      var floorWarnings = Configuration.ShowSnapWarning;
-      DrawSwitchRowInline("Floor snap warnings", ref floorWarnings);
-      if (floorWarnings != Configuration.ShowSnapWarning)
+    private void DrawWarningsSection()
+    {
+      var s = Theme.UiScale;
+      UiKit.Section(FontAwesomeIcon.ExclamationTriangle, "warnings");
+      var avail = ImGui.GetContentRegionAvail().X;
+      var w = (avail - Theme.Gap) / 2f;
+
+      var floor = Configuration.ShowSnapWarning;
+      var newFloor = UiKit.ToggleChip("##hu-w-floor", "Floor", floor, w, "Floor snap warnings.");
+      if (newFloor != floor)
       {
-        Configuration.ShowSnapWarning = floorWarnings;
+        Configuration.ShowSnapWarning = newFloor;
         Configuration.Save();
       }
 
-      var itemWarnings = Configuration.ShowItemSnapWarning;
-      DrawSwitchRowInline("Item-to-item warnings", ref itemWarnings);
-      if (itemWarnings != Configuration.ShowItemSnapWarning)
+      ImGui.SameLine(0, Theme.Gap);
+      var items = Configuration.ShowItemSnapWarning;
+      var newItems = UiKit.ToggleChip("##hu-w-item", "Items", items, w, "Item-to-item snap warnings.");
+      if (newItems != items)
       {
-        Configuration.ShowItemSnapWarning = itemWarnings;
+        Configuration.ShowItemSnapWarning = newItems;
         Configuration.Save();
       }
 
-      var tableWarnings = Configuration.ShowTableSnapWarning;
-      DrawSwitchRowInline("Table snap warnings", ref tableWarnings);
-      if (tableWarnings != Configuration.ShowTableSnapWarning)
+      var tables = Configuration.ShowTableSnapWarning;
+      var newTables = UiKit.ToggleChip("##hu-w-table", "Tables", tables, w, "Tabletop snap warnings.");
+      if (newTables != tables)
       {
-        Configuration.ShowTableSnapWarning = tableWarnings;
+        Configuration.ShowTableSnapWarning = newTables;
         Configuration.Save();
       }
 
-      var wallWarnings = Configuration.ShowWallSnapWarning;
-      DrawSwitchRowInline("Wall snap warnings", ref wallWarnings);
-      if (wallWarnings != Configuration.ShowWallSnapWarning)
+      ImGui.SameLine(0, Theme.Gap);
+      var walls = Configuration.ShowWallSnapWarning;
+      var newWalls = UiKit.ToggleChip("##hu-w-wall", "Walls", walls, w, "Wall snap + reverse warnings.");
+      if (newWalls != walls)
       {
-        Configuration.ShowWallSnapWarning = wallWarnings;
+        Configuration.ShowWallSnapWarning = newWalls;
         Configuration.Save();
       }
 
-      ImGui.Dummy(new Vector2(0, 4f * s));
-      ImGui.TextColored(Theme.Muted, "Item snap range");
-      if (ImGui.IsItemHovered())
-        ImGui.SetTooltip("Which item's SphereCastRange drives item-to-item distance.");
-      ImGui.Dummy(new Vector2(0, 2f * s));
+      ImGui.Dummy(new Vector2(0, 3f * s));
       var mode = (int)Configuration.ItemSnapRangeMode;
-      var newMode = UiKit.Segmented("##hu-snapmode", new[] { "Either", "Sum", "Placed" }, mode);
+      var newMode = UiKit.Segmented("##hu-range", new[] { "Either", "Sum", "Placed" }, mode);
       if (newMode != mode)
       {
         Configuration.ItemSnapRangeMode = (ItemSnapRangeMode)newMode;
         Configuration.Save();
       }
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Which item's SphereCastRange drives item-to-item distance.");
+    }
 
-      ImGui.Dummy(new Vector2(0, Theme.Gap));
+    // ------------------------------------------------------------ inventory
+
+    private void DrawInventorySection()
+    {
       UiKit.Section(FontAwesomeIcon.List, "inventory");
+      var avail = ImGui.GetContentRegionAvail().X;
+      var w = (avail - 2f * Theme.Gap) / 3f;
 
       var housingGoods = AtkManager.HousingGoods != null && AtkManager.HousingGoods.IsVisible;
-      DrawSwitchRowInline("Furnishing list", ref housingGoods);
-      if (housingGoods != (AtkManager.HousingGoods != null && AtkManager.HousingGoods.IsVisible))
+      var newGoods = UiKit.ToggleChip("##hu-inv-list", "Furnishing list", housingGoods, w);
+      if (newGoods != housingGoods)
       {
-        AtkManager.ShowFurnishingList(housingGoods);
-        Configuration.DisplayFurnishingList = housingGoods;
+        AtkManager.ShowFurnishingList(newGoods);
+        Configuration.DisplayFurnishingList = newGoods;
         Configuration.Save();
       }
 
+      ImGui.SameLine(0, Theme.Gap);
       var inventory = AtkManager.InventoryVisible;
-      DrawSwitchRowInline("Inventory", ref inventory);
-      if (inventory != AtkManager.InventoryVisible)
+      var newInventory = UiKit.ToggleChip("##hu-inv-bags", "Inventory", inventory, w);
+      if (newInventory != inventory)
       {
-        AtkManager.ShowInventory(inventory);
-        Configuration.DisplayInventory = inventory;
+        AtkManager.ShowInventory(newInventory);
+        Configuration.DisplayInventory = newInventory;
         Configuration.Save();
       }
 
-      ImGui.Dummy(new Vector2(0, 4f * s));
-      if (UiKit.TextIconButton("##hu-open-list", FontAwesomeIcon.List, "Open furnishing list"))
+      ImGui.SameLine(0, Theme.Gap);
+      if (UiKit.ChipButton("##hu-inv-open", "Open list", false, w))
         Plugin.CommandManager.ProcessCommand("/hu list");
       if (ImGui.IsItemHovered())
         ImGui.SetTooltip("Sortable list of placed furnishings — click one to select it.");
+    }
 
-      ImGui.Dummy(new Vector2(0, Theme.Gap));
+    // ---------------------------------------------------------- maintenance
+
+    private void DrawMaintenanceSection()
+    {
+      var s = Theme.UiScale;
       UiKit.Section(FontAwesomeIcon.Cog, "maintenance");
+      var avail = ImGui.GetContentRegionAvail().X;
+      var w = (avail - 2f * Theme.Gap) / 3f;
 
-      if (UiKit.TextIconButton("##hu-wallcache", FontAwesomeIcon.Sync, "Rebuild wall cache"))
+      if (UiKit.ChipButton("##hu-m-walls", "Rebuild walls", false, w))
         Memory.InvalidateTerritoryWallCache();
       if (ImGui.IsItemHovered())
         ImGui.SetTooltip("Re-scan the house walls on the next wall item selection.");
 
       ImGui.SameLine(0, Theme.Gap);
-      if (UiKit.TextIconButton("##hu-reset", FontAwesomeIcon.ArrowsAlt, "Reset window"))
+      if (UiKit.ChipButton("##hu-m-reset", "Reset window", false, w))
         Reset = true;
+      if (ImGui.IsItemHovered())
+        ImGui.SetTooltip("Move the window back to its default position.");
 
-      ImGui.Spacing();
-      if (UiKit.GradientButton("##hu-log", SnapLogger.Enabled ? "Stop logging" : "Start logging",
-            Theme.Accent, Theme.Warn, 34f))
+      ImGui.SameLine(0, Theme.Gap);
+      if (UiKit.ChipButton("##hu-m-log", SnapLogger.Enabled ? "Logging: on" : "Logging: off", SnapLogger.Enabled, w))
       {
         SnapLogger.ManualOverride = true;
         if (SnapLogger.Enabled)
@@ -285,65 +264,30 @@ namespace HousingUnlocked.Interface.Windows
       ImGui.TextColored(Theme.Muted, "Debug window: /hu debug");
     }
 
-    /// <summary>Switch row laid out in normal flow; writes the new value back through ref.</summary>
-    private static void DrawSwitchRowInline(string label, ref bool value)
-    {
-      var s = Theme.UiScale;
-      var start = ImGui.GetCursorScreenPos();
-      var avail = ImGui.GetContentRegionAvail().X;
+    // ---------------------------------------------------------------- about
 
-      ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + 2f * s));
-      ImGui.TextColored(Theme.Text, label);
-
-      ImGui.SetCursorScreenPos(new Vector2(start.X + avail - 40f * s, start.Y + 3f * s));
-      value = UiKit.Toggle("##hu-sw-" + label, value);
-
-      ImGui.SetCursorScreenPos(new Vector2(start.X, start.Y + 26f * s));
-    }
-
-    // ----------------------------------------------------------------- about
-
-    private void DrawAboutPage()
+    private void DrawAboutSection()
     {
       var s = Theme.UiScale;
       var version = typeof(Plugin).Assembly.GetName().Version?.ToString() ?? "dev";
 
-      var (min, max) = UiKit.BeginCard(96f);
-      var dl = ImGui.GetWindowDrawList();
-      dl.AddRectFilled(new Vector2(min.X + Theme.Pad, min.Y + Theme.Pad - 2f * s),
-        new Vector2(min.X + Theme.Pad + 6f * s, min.Y + Theme.Pad + 14f * s), Theme.U32(Theme.Accent), Theme.RadiusTag);
-
-      ImGui.SetCursorScreenPos(new Vector2(min.X + Theme.Pad + 14f * s, min.Y + Theme.Pad - 4f * s));
-      ImGui.TextColored(Theme.Text, "Housing Unlocked");
-      ImGui.SameLine(0, Theme.Gap);
+      UiKit.Section(FontAwesomeIcon.InfoCircle, "about");
       UiKit.Chip($"v{version}", Theme.Accent);
-
-      ImGui.SetCursorScreenPos(new Vector2(min.X + Theme.Pad + 14f * s, min.Y + Theme.Pad + 22f * s));
-      ImGui.TextColored(Theme.Muted, "Snap prediction and placement control for FFXIV housing.");
-
-      ImGui.SetCursorScreenPos(new Vector2(min.X + Theme.Pad, min.Y + Theme.Pad + 50f * s));
-      ImGui.TextColored(Theme.Muted, "Forked from BDTH by LeonBlade.");
-
-      ImGui.Dummy(new Vector2(0, Theme.Gap));
-      UiKit.Section(FontAwesomeIcon.Heart, "community");
-
-      if (UiKit.TextIconButton("##hu-github", FontAwesomeIcon.Link, "GitHub / issues"))
+      ImGui.SameLine(0, Theme.Gap);
+      if (UiKit.ChipButton("##hu-about-github", "GitHub / issues"))
         Dalamud.Utility.Util.OpenLink("https://github.com/dexcss/HousingUnlocked");
       if (ImGui.IsItemHovered())
         ImGui.SetTooltip("Source, releases and issue tracker.");
 
-      ImGui.Dummy(new Vector2(0, Theme.Gap));
-      ImGui.TextColored(Theme.Muted, "Under active testing — features may be incomplete.");
-      ImGui.TextColored(Theme.Muted, "Please report bugs with a session log (/hu log).");
+      ImGui.Dummy(new Vector2(0, 2f * s));
+      ImGui.TextColored(Theme.Muted, "Forked from BDTH by LeonBlade.");
+      ImGui.TextColored(Theme.Muted, "Under active testing — report bugs with /hu log.");
+      _ = s;
     }
 
     private static void DrawHint(string text)
     {
-      var s = Theme.UiScale;
-      var (min, max) = UiKit.BeginCard(46f);
-      ImGui.SetCursorScreenPos(new Vector2(min.X + Theme.Pad, min.Y + Theme.Pad));
       ImGui.TextColored(Theme.Muted, text);
-      _ = max;
     }
   }
 }
