@@ -85,9 +85,7 @@ namespace HousingUnlocked.Interface.Windows
     private unsafe void DrawItemPage()
     {
       var s = Theme.UiScale;
-      DrawQuickToggles();
-      ImGui.Dummy(new Vector2(0, 2f * s));
-      DrawControlsRow();
+      DrawTopSection();
 
       if (Memory.HousingStructure == null || Memory.HousingStructure->Mode == HousingLayoutMode.None)
         DrawHint("Enter housing mode to get started.");
@@ -100,18 +98,20 @@ namespace HousingUnlocked.Interface.Windows
         _itemControls.Draw();
     }
 
-    private void DrawQuickToggles()
+    /// <summary>
+    /// Compact top block: the three placement toggles as chips in one row, then the drag step and
+    /// gizmo space on the next row. Laid out in normal ImGui flow so the cursor always ends below
+    /// the block (the old card + absolute rows left the cursor inside the card and overlapped).
+    /// </summary>
+    private void DrawTopSection()
     {
       var s = Theme.UiScale;
-      var rowH = 26f * s;
-      var (min, max) = UiKit.BeginCard(3f * rowH + Theme.Pad * 2f);
-      var x = min.X + Theme.Pad;
-      var right = max.X - Theme.Pad;
-      var y = min.Y + Theme.Pad;
+      var gap = Theme.Gap;
+      var chipW = (ImGui.GetContentRegionAvail().X - 2f * gap) / 3f;
 
       var placeAnywhere = Configuration.PlaceAnywhere;
-      var newPlaceAnywhere = SwitchRow("Place Anywhere", placeAnywhere,
-        "Place objects without the engine's placement limits.", new Vector2(x, y), right, rowH);
+      var newPlaceAnywhere = UiKit.ToggleChip("##hu-chip-pa", "Place Anywhere", placeAnywhere, chipW,
+        "Place objects without the engine's placement limits.");
       if (newPlaceAnywhere != placeAnywhere)
       {
         PluginMemory.SetPlaceAnywhere(newPlaceAnywhere);
@@ -119,67 +119,49 @@ namespace HousingUnlocked.Interface.Windows
         Configuration.Save();
       }
 
-      y += rowH;
+      ImGui.SameLine(0, gap);
       var useGizmo = Configuration.UseGizmo;
-      var newUseGizmo = SwitchRow("Gizmo", useGizmo,
-        "Show a movement gizmo on the selected item.", new Vector2(x, y), right, rowH);
+      var newUseGizmo = UiKit.ToggleChip("##hu-chip-gizmo", "Gizmo", useGizmo, chipW,
+        "Show a movement gizmo on the selected item.");
       if (newUseGizmo != useGizmo)
       {
         Configuration.UseGizmo = newUseGizmo;
         Configuration.Save();
       }
 
-      y += rowH;
+      ImGui.SameLine(0, gap);
       var doSnap = Configuration.DoSnap;
-      var newDoSnap = SwitchRow("Snap to grid", doSnap,
-        "Snap gizmo movement to the drag grid.", new Vector2(x, y), right, rowH);
+      var newDoSnap = UiKit.ToggleChip("##hu-chip-snap", "Snap grid", doSnap, chipW,
+        "Snap gizmo movement to the drag grid.");
       if (newDoSnap != doSnap)
       {
         Configuration.DoSnap = newDoSnap;
         Configuration.Save();
       }
-    }
 
-    /// <summary>Label on the left, switch on the right; returns the (possibly new) value.</summary>
-    private static bool SwitchRow(string label, bool value, string tooltip, Vector2 at, float rightEdge, float rowH)
-    {
-      var s = Theme.UiScale;
-      ImGui.SetCursorScreenPos(new Vector2(at.X, at.Y + (rowH - ImGui.GetTextLineHeight()) * 0.5f));
-      ImGui.TextColored(Theme.Text, label);
-      if (tooltip.Length > 0 && ImGui.IsItemHovered())
-        ImGui.SetTooltip(tooltip);
-
-      ImGui.SetCursorScreenPos(new Vector2(rightEdge - 40f * s, at.Y + (rowH - 22f * s) * 0.5f));
-      return UiKit.Toggle("##hu-sw-" + label, value);
-    }
-
-    // -------------------------------------------------------------- settings
-
-    /// <summary>Drag step and gizmo space — on the item page, where they are used.</summary>
-    private void DrawControlsRow()
-    {
-      var s = Theme.UiScale;
+      ImGui.Dummy(new Vector2(0, 2f * s));
 
       ImGui.TextColored(Theme.Text, "Drag");
       if (ImGui.IsItemHovered())
         ImGui.SetTooltip("Step for the +/- buttons, mouse wheel, and gizmo snap.");
-      ImGui.SameLine(0, Theme.Gap);
-      ImGui.SetNextItemWidth(80f * s);
+      ImGui.SameLine(0, gap);
+      ImGui.SetNextItemWidth(70f * s);
       var drag = Configuration.Drag;
-      if (ImGui.InputFloat("##hu-drag", ref drag, 0.01f, 0f, "%.3f"))
+      if (ImGui.InputFloat("##hu-drag", ref drag, 0f, 0f, "%.3f"))
       {
         Configuration.Drag = Math.Clamp(drag, 0.001f, 10f);
         Configuration.Save();
       }
 
-      ImGui.SameLine(0, Theme.Gap * 2f);
+      ImGui.SameLine(0, gap * 2f);
       var local = _gizmo.Mode == ImGuizmoMode.Local;
-      if (UiKit.TextIconButton("##hu-gizmo-space", local ? FontAwesomeIcon.ArrowsAlt : FontAwesomeIcon.Globe,
-            local ? "Local" : "World"))
+      if (UiKit.ChipButton("##hu-gizmo-space", local ? "Gizmo: Local" : "Gizmo: World"))
         _gizmo.Mode = local ? ImGuizmoMode.World : ImGuizmoMode.Local;
       if (ImGui.IsItemHovered())
         ImGui.SetTooltip("Gizmo axes: local item space or world space.");
     }
+
+    // -------------------------------------------------------------- settings
 
     private void DrawSettingsPage()
     {
